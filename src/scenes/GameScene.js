@@ -8,12 +8,10 @@ export default class GameScene extends Phaser.Scene {
     }
 
     create() {
-        // Physics Setup (No bounds for infinite feeling)
-        // We do not set bounds so the world is technically infinite
-        // Note: Matter.js bodies will simulate anywhere, but we might want a large grid for reference.
+        // Physics Setup
+        // No bounds for infinite world
 
-        // Background Grid (Make it huge for now, we can tile sprite it later)
-        // 40000x40000 is plenty big for a demo
+        // Background Grid (Huge for now)
         this.add.grid(0, 0, 40000, 40000, 100, 100, 0x222222).setAltFillStyle(0x1a1a1a).setOutlineStyle(0x333333);
 
         // Player
@@ -26,9 +24,9 @@ export default class GameScene extends Phaser.Scene {
 
         // Food Management
         this.foods = [];
+        this.lastCleanupTime = 0;
 
-        // Initial Population around 0,0
-        // Spawn slightly more initially so user sees stuff immediately
+        // Initial Population
         for (let i = 0; i < 40; i++) {
             this.spawnFoodAround(0, 0, 1000);
         }
@@ -107,10 +105,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     spawnFoodAround(x, y, radius) {
-        // Spawn randomly within a radius
         const angle = Math.random() * Math.PI * 2;
-        // Bias distance to be further out to avoid popping in on player
-        // Spawn between 0.5 * radius and 1.0 * radius
         const dist = radius * (0.5 + Math.random() * 0.5);
 
         const fx = x + Math.cos(angle) * dist;
@@ -132,7 +127,6 @@ export default class GameScene extends Phaser.Scene {
             this.player.eat(food.value);
             food.destroy();
 
-            // Camera Zoom
             const targetZoom = Phaser.Math.Clamp(1.0 / (this.player.currentScale * 0.8), 0.2, 1.5);
             this.cameras.main.zoomTo(targetZoom, 500);
         }
@@ -142,45 +136,42 @@ export default class GameScene extends Phaser.Scene {
         if (this.player) {
             this.player.update();
 
-            // 1. Input Forces
             if (this.isTouching) {
                 const forceX = this.joystickVector.x * 0.000005;
                 const forceY = this.joystickVector.y * 0.000005;
                 this.player.applyForce({ x: forceX, y: forceY });
             }
 
-            // 2. Infinite World Management
-            const playerPos = this.player.centralBody.position;
-            const zoom = this.cameras.main.zoom;
-            // Radius where we want active entities (e.g., 1.5 screens wide)
-            const activeRadius = (Math.max(this.scale.width, this.scale.height) / zoom) * 1.5;
-
-            // Despawn logic (remove things too far away)
-            for (let i = this.foods.length - 1; i >= 0; i--) {
-                const f = this.foods[i];
-                const d = Phaser.Math.Distance.Between(playerPos.x, playerPos.y, f.body.position.x, f.body.position.y);
-
-                // If it's way outside our active radius, destroy it to save memory
-                // But keep a buffer so they don't disappear visibly
-                if (d > activeRadius * 1.5) {
-                    f.destroy();
-                    this.foods.splice(i, 1);
-                }
+            // OPTIMIZATION: Run world management only once per second (every 1000ms)
+            if (time > this.lastCleanupTime + 1000) {
+                this.lastCleanupTime = time;
+                this.manageWorld();
             }
 
-            // Respawn logic (keep density around player)
-            // Target food count relative to visible area size? Or just fixed?
-            // Fixed is easier for now.
-            const targetFoodCount = 40;
-
-            if (this.foods.length < targetFoodCount) {
-                // Spawn new food at the edge of the active radius
-                // so it appears as we move towards it
-                this.spawnFoodAround(playerPos.x, playerPos.y, activeRadius);
-            }
-
-            // Update Visuals
             this.foods.forEach(f => f.update());
+        }
+    }
+
+    manageWorld() {
+        const playerPos = this.player.centralBody.position;
+        const zoom = this.cameras.main.zoom;
+        const activeRadius = (Math.max(this.scale.width, this.scale.height) / zoom) * 1.5;
+
+        // Despawn logic
+        for (let i = this.foods.length - 1; i >= 0; i--) {
+            const f = this.foods[i];
+            const d = Phaser.Math.Distance.Between(playerPos.x, playerPos.y, f.body.position.x, f.body.position.y);
+
+            if (d > activeRadius * 1.5) {
+                f.destroy();
+                this.foods.splice(i, 1);
+            }
+        }
+
+        // Respawn logic
+        const targetFoodCount = 40;
+        if (this.foods.length < targetFoodCount) {
+            this.spawnFoodAround(playerPos.x, playerPos.y, activeRadius);
         }
     }
 }
