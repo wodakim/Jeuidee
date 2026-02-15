@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jelly Evolution</title>
+    <style>
+        /* CSS Reset & Basic Styling */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000510; /* Deep sea dark blue */
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Game Container */
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: calc(100% - 50px); /* Reserve space for Ad */
+            z-index: 1;
+        }
+
+        /* Ad Placeholder */
+        #ad-placeholder {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 50px;
+            background: #222;
+            color: #888;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            font-size: 12px;
+            border-top: 1px solid #444;
+            box-sizing: border-box;
+        }
+
+        /* Landscape Enforcement Overlay */
+        #orientation-lock {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            color: #fff;
+            display: none; /* Hidden by default */
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            flex-direction: column;
+            text-align: center;
+        }
+
+        /* Logic to show orientation lock on portrait */
+        @media screen and (orientation: portrait) {
+            #orientation-lock { display: flex; }
+        }
+
+        /* UI Layer - sits above canvas */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: calc(100% - 50px);
+            pointer-events: none; /* Let touches pass through to canvas by default */
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Interactive Elements need pointer-events: auto */
+        .interactive {
+            pointer-events: auto;
+        }
+
+        /* HUD */
+        #hud {
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .stat-box {
+            background: rgba(0, 20, 40, 0.6);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            backdrop-filter: blur(4px);
+        }
+
+        #dna-container {
+            width: 200px;
+        }
+
+        #dna-bar-bg {
+            width: 100%;
+            height: 10px;
+            background: #111;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        #dna-bar-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #00ffff, #00ff88);
+            transition: width 0.3s ease-out;
+        }
+
+        /* Start Menu / Evolution Menu Overlay */
+        .menu-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 10, 20, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+            backdrop-filter: blur(8px);
+            transition: opacity 0.3s;
+        }
+
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        h1 {
+            color: #00ffff;
+            text-shadow: 0 0 10px #00ffff;
+            margin-bottom: 20px;
+            font-size: 2.5rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        h2 {
+            color: #fff;
+            margin-bottom: 15px;
+        }
+
+        button {
+            background: linear-gradient(180deg, #00ccff, #0088cc);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 30px;
+            color: #fff;
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 200, 255, 0.4);
+            transition: transform 0.1s, filter 0.2s;
+            text-transform: uppercase;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        button:hover {
+            filter: brightness(1.2);
+        }
+
+        button.diet-herbivore {
+            background: linear-gradient(180deg, #44ff44, #00aa00);
+            box-shadow: 0 4px 15px rgba(0, 255, 0, 0.4);
+        }
+
+        button.diet-carnivore {
+            background: linear-gradient(180deg, #ff4444, #aa0000);
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.4);
+        }
+
+        /* Evolution Cards */
+        .evo-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .evo-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+            width: 150px;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        .evo-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+        }
+
+        .evo-icon {
+            width: 60px;
+            height: 60px;
+            background: #000;
+            border-radius: 50%;
+            margin: 0 auto 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            border: 2px solid #fff;
+        }
+
+    </style>
+    <!-- Phaser 3 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <!-- Local Fallback Comment:
+         <script src="phaser.min.js"></script>
+    -->
+</head>
+<body>
+
+    <!-- Landscape Lock -->
+    <div id="orientation-lock">
+        <div style="font-size: 40px; margin-bottom: 20px;">📱↺</div>
+        <h1>Please Rotate Your Device</h1>
+        <p>This experience is designed for Landscape mode.</p>
+    </div>
+
+    <!-- Game Container -->
+    <div id="game-container"></div>
+
+    <!-- UI Layer -->
+    <div id="ui-layer">
+
+        <!-- HUD (Top Left/Right) -->
+        <div id="hud" class="interactive">
+            <div class="stat-box" id="dna-container">
+                <div>DNA / EVOLUTION</div>
+                <div id="dna-bar-bg"><div id="dna-bar-fill"></div></div>
+            </div>
+            <div class="stat-box">
+                <div id="score-display">MASS: 10</div>
+            </div>
+        </div>
+
+        <!-- Start Menu -->
+        <div id="start-menu" class="menu-overlay interactive">
+            <h1>Neon Evolution</h1>
+
+            <div id="continue-btn-container" style="display: none; margin-bottom: 20px;">
+                <button onclick="continueGame()" style="background: linear-gradient(180deg, #ffcc00, #aa8800); box-shadow: 0 4px 15px rgba(255, 200, 0, 0.4);">CONTINUE EVOLUTION</button>
+                <p style="font-size: 0.8em; color: #aaa;">- OR RESTART -</p>
+            </div>
+
+            <h2>Choose Your Diet</h2>
+            <div style="display: flex; gap: 20px;">
+                <button class="diet-herbivore" onclick="startGame('herbivore')">Herbivore<br><span style="font-size: 0.7em">(Eats Plants)</span></button>
+                <button class="diet-carnivore" onclick="startGame('carnivore')">Carnivore<br><span style="font-size: 0.7em">(Eats Meat & Meat)</span></button>
+            </div>
+        </div>
+
+        <!-- Evolution Menu (Hidden initially) -->
+        <div id="evo-menu" class="menu-overlay interactive hidden">
+            <h1>Evolve!</h1>
+            <h2>Choose an Upgrade</h2>
+            <div class="evo-container">
+                <div class="evo-card" onclick="evolve('speed')">
+                    <div class="evo-icon" style="border-color: #00ffff; color: #00ffff;">⚡</div>
+                    <h3>Fins</h3>
+                    <p>+ Speed</p>
+                </div>
+                <div class="evo-card" onclick="evolve('attack')">
+                    <div class="evo-icon" style="border-color: #ff0055; color: #ff0055;">⚔️</div>
+                    <h3>Spikes</h3>
+                    <p>+ Damage</p>
+                </div>
+                <div class="evo-card" onclick="evolve('color')">
+                    <div class="evo-icon" style="border-color: #ff00ff; color: #ff00ff;">🎨</div>
+                    <h3>Color</h3>
+                    <p>Random Mutation</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Ad Space -->
+    <div id="ad-placeholder">
+        AD SPACE (BANNER)
+    </div>
+
+    <script>
+        // --- GAME CONFIGURATION ---
+        const GAME_WIDTH = window.innerWidth;
+        const GAME_HEIGHT = window.innerHeight - 50; // Subtract Ad space
+        const WORLD_SIZE = 4000;
+
+        let gameInstance = null;
+        let selectedDiet = 'herbivore'; // Default
+
+        // --- SCENES ---
+
+        class BootScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'BootScene' });
+            }
+
+            create() {
+                // Generate Textures Programmatically (No External Assets)
+                this.generatePlayerTexture();
+                this.generateFoodTextures();
+                this.generateEnemyTextures();
+                this.generateBackgroundTextures();
+                this.generatePartsTextures();
+
+                // Start the Main Scene
+                this.scene.start('MainScene');
+            }
+
+            generatePlayerTexture() {
+                const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+
+                // Base Body (Glow Effect)
+                graphics.fillStyle(0x00ffff, 0.3);
+                graphics.fillCircle(32, 32, 32);
+                graphics.fillStyle(0x00ffff, 0.6);
+                graphics.fillCircle(32, 32, 24);
+                graphics.fillStyle(0xffffff, 1.0);
+                graphics.fillCircle(32, 32, 12);
+
+                // Eyes
+                graphics.fillStyle(0xffffff, 1);
+                graphics.fillCircle(20, 24, 6);
+                graphics.fillCircle(44, 24, 6);
+                graphics.fillStyle(0x000000, 1);
+                graphics.fillCircle(20, 24, 2);
+                graphics.fillCircle(44, 24, 2);
+
+                graphics.generateTexture('player_base', 64, 64);
+                graphics.clear();
+            }
+
+            generateFoodTextures() {
+                const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+
+                // Plant (Green Orb)
+                graphics.fillStyle(0x00ff00, 0.5);
+                graphics.fillCircle(8, 8, 8);
+                graphics.fillStyle(0xccffcc, 1);
+                graphics.fillCircle(8, 8, 4);
+                graphics.generateTexture('food_plant', 16, 16);
+                graphics.clear();
+
+                // Meat (Red Jagged)
+                graphics.fillStyle(0xff0000, 0.6);
+                graphics.beginPath();
+                graphics.moveTo(8, 0);
+                graphics.lineTo(16, 8);
+                graphics.lineTo(8, 16);
+                graphics.lineTo(0, 8);
+                graphics.closePath();
+                graphics.fillPath();
+                graphics.fillStyle(0xffaaaa, 1);
+                graphics.fillCircle(8, 8, 3);
+                graphics.generateTexture('food_meat', 16, 16);
+                graphics.clear();
+            }
+
+            generateEnemyTextures() {
+                const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+
+                // Enemy 1 (Triangle)
+                graphics.fillStyle(0xff00ff, 0.8);
+                graphics.beginPath();
+                graphics.moveTo(32, 0);
+                graphics.lineTo(64, 64);
+                graphics.lineTo(0, 64);
+                graphics.closePath();
+                graphics.fillPath();
+                // Eye
+                graphics.fillStyle(0xffffff, 1);
+                graphics.fillCircle(32, 32, 8);
+                graphics.fillStyle(0x000000, 1);
+                graphics.fillCircle(32, 32, 3);
+
+                graphics.generateTexture('enemy_triangle', 64, 64);
+                graphics.clear();
+
+                // Enemy 2 (Spiky Circle)
+                graphics.fillStyle(0xffaa00, 0.8);
+                graphics.fillCircle(32, 32, 24);
+                // Spikes
+                for(let i=0; i<8; i++) {
+                    let angle = (i / 8) * Math.PI * 2;
+                    let x = 32 + Math.cos(angle) * 32;
+                    let y = 32 + Math.sin(angle) * 32;
+                    graphics.fillCircle(x, y, 6);
+                }
+                 // Eye
+                 graphics.fillStyle(0xffffff, 1);
+                 graphics.fillCircle(32, 32, 8);
+                 graphics.fillStyle(0x000000, 1);
+                 graphics.fillCircle(32, 32, 3);
+
+                graphics.generateTexture('enemy_spiky', 64, 64);
+                graphics.clear();
+            }
+
+            generateBackgroundTextures() {
+                const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+
+                // Deep Blob (Large, dark)
+                graphics.fillStyle(0x000033, 0.5);
+                graphics.fillCircle(128, 128, 128);
+                graphics.generateTexture('bg_blob', 256, 256);
+                graphics.clear();
+
+                // Bubble (Small, white)
+                graphics.fillStyle(0xffffff, 0.2);
+                graphics.fillCircle(8, 8, 8);
+                graphics.generateTexture('bg_bubble', 16, 16);
+                graphics.clear();
+            }
+
+            generatePartsTextures() {
+                const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+
+                // Fin (Speed)
+                graphics.fillStyle(0x00ffff, 0.8);
+                graphics.beginPath();
+                graphics.moveTo(0, 0);
+                graphics.quadraticBezierTo(20, 10, 0, 30);
+                graphics.closePath();
+                graphics.fillPath();
+                graphics.generateTexture('part_fin', 32, 32);
+                graphics.clear();
+
+                // Spike (Attack)
+                graphics.fillStyle(0xff0000, 0.9);
+                graphics.beginPath();
+                graphics.moveTo(0, 0);
+                graphics.lineTo(30, 10);
+                graphics.lineTo(0, 20);
+                graphics.closePath();
+                graphics.fillPath();
+                graphics.generateTexture('part_spike', 32, 20);
+                graphics.clear();
+            }
+        }
+
+        class MainScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'MainScene' });
+                this.isGameRunning = false;
+            }
+
+            create() {
+                console.log("Main Scene Started");
+
+                // Wait for UI start
+                // We will init the game world only after "StartGame" is called
+                // But for now, we just sit idle or show a cool background loop
+            }
+
+            startGameLogic() {
+                this.isGameRunning = true;
+                this.scene.start('GameScene'); // Transition to actual gameplay scene
+            }
+        }
+
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+                this.player = null;
+                this.joystickBase = null;
+                this.joystickStick = null;
+                this.isTouching = false;
+                this.touchStartPoint = null;
+
+                // Game Stats
+                this.playerMass = 10;
+                this.playerSpeed = 200;
+                this.playerScale = 1;
+                this.dna = 0;
+                this.maxDna = 100;
+                this.playerTint = 0xffffff; // Default White
+
+                // Upgrades
+                this.hasFins = false;
+                this.hasSpikes = false;
+
+                // Backgrounds
+                this.bgDeep = null;
+                this.bgMid = null;
+
+                // Entities
+                this.foodGroup = null;
+                this.enemyGroup = null;
+            }
+
+            create() {
+                // 1. World Setup
+                this.physics.world.setBounds(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+                // --- ENTITIES SETUP ---
+
+                // Food Group
+                this.foodGroup = this.physics.add.group();
+                this.spawnFood(200); // Spawn 200 food items
+
+                // Enemy Group
+                this.enemyGroup = this.physics.add.group();
+                this.spawnEnemies(20); // Spawn 20 enemies
+
+                // 2. Backgrounds (Parallax)
+                // Deep background (Very slow move)
+                this.bgDeep = this.add.tileSprite(0, 0, GAME_WIDTH, GAME_HEIGHT, 'bg_blob')
+                    .setScrollFactor(0)
+                    .setOrigin(0, 0)
+                    .setAlpha(0.3)
+                    .setDepth(-10);
+
+                // Mid background (Bubbles - moves with parallax)
+                this.bgMid = this.add.tileSprite(0, 0, GAME_WIDTH, GAME_HEIGHT, 'bg_bubble')
+                    .setScrollFactor(0)
+                    .setOrigin(0, 0)
+                    .setAlpha(0.1)
+                    .setDepth(-5);
+
+                // 3. Player Setup
+                this.createPlayer();
+
+                // Load Game Data if requested
+                if (window.shouldLoadGame) {
+                    this.loadGameData();
+                    window.shouldLoadGame = false;
+                }
+
+                // 4. Camera Setup
+                this.cameras.main.setBounds(0, 0, WORLD_SIZE, WORLD_SIZE);
+                this.cameras.main.startFollow(this.player, true, 0.05, 0.05);
+                this.cameras.main.setZoom(1);
+
+                // 5. Input (Virtual Joystick)
+                this.input.addPointer(1); // Ensure multi-touch support if needed
+
+                this.input.on('pointerdown', (pointer) => {
+                    this.isTouching = true;
+                    this.touchStartPoint = { x: pointer.x, y: pointer.y };
+
+                    // Show Joystick Visuals
+                    this.joystickBase.setPosition(pointer.x, pointer.y).setVisible(true);
+                    this.joystickStick.setPosition(pointer.x, pointer.y).setVisible(true);
+                });
+
+                this.input.on('pointermove', (pointer) => {
+                    if (this.isTouching) {
+                        this.handleJoystickMove(pointer);
+                    }
+                });
+
+                this.input.on('pointerup', () => {
+                    this.isTouching = false;
+                    this.player.body.setVelocity(0);
+                    this.joystickBase.setVisible(false);
+                    this.joystickStick.setVisible(false);
+
+                    // Reset Jelly Squish
+                    this.tweens.add({
+                        targets: this.player,
+                        scaleX: this.playerScale,
+                        scaleY: this.playerScale,
+                        duration: 200,
+                        ease: 'Back.out'
+                    });
+                });
+
+                // Joystick Graphics
+                this.createJoystickGraphics();
+
+                // 6. UI Update
+                this.updateUI();
+
+                // 7. Jelly Idle Animation
+                this.tweens.add({
+                    targets: this.player,
+                    scaleX: () => this.playerScale * 1.05,
+                    scaleY: () => this.playerScale * 0.95,
+                    yoyo: true,
+                    repeat: -1,
+                    duration: 1000,
+                    ease: 'Sine.easeInOut'
+                });
+
+                // 8. Collisions
+                this.physics.add.overlap(this.player, this.foodGroup, this.eatFood, null, this);
+                this.physics.add.overlap(this.player, this.enemyGroup, this.handleEnemyCollision, null, this);
+
+                // 9. Auto-Save Timer
+                this.time.addEvent({
+                    delay: 5000,
+                    callback: this.saveGameData,
+                    callbackScope: this,
+                    loop: true
+                });
+            }
+
+            spawnFood(count) {
+                for(let i=0; i<count; i++) {
+                    const x = Phaser.Math.Between(0, WORLD_SIZE);
+                    const y = Phaser.Math.Between(0, WORLD_SIZE);
+                    const type = Phaser.Math.RND.pick(['food_plant', 'food_meat']);
+
+                    const food = this.foodGroup.create(x, y, type);
+                    food.foodType = (type === 'food_plant') ? 'herbivore' : 'carnivore';
+
+                    // Small random movement for floating effect
+                    this.tweens.add({
+                        targets: food,
+                        y: y + 10,
+                        duration: Phaser.Math.Between(1000, 3000),
+                        yoyo: true,
+                        repeat: -1,
+                        ease: 'Sine.easeInOut'
+                    });
+                }
+            }
+
+            spawnEnemies(count) {
+                for(let i=0; i<count; i++) {
+                    const x = Phaser.Math.Between(0, WORLD_SIZE);
+                    const y = Phaser.Math.Between(0, WORLD_SIZE);
+
+                    // Don't spawn too close to player
+                    if (Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) < 500) continue;
+
+                    const type = Phaser.Math.RND.pick(['enemy_triangle', 'enemy_spiky']);
+                    const enemy = this.enemyGroup.create(x, y, type);
+
+                    // Randomize Enemy Stats
+                    const sizeTier = Phaser.Math.RND.pick([0.5, 1, 2]); // Small, Medium, Huge
+                    enemy.setScale(sizeTier);
+                    enemy.mass = 10 * sizeTier * sizeTier; // Approx mass based on size
+                    enemy.isCarnivore = (Math.random() > 0.5);
+
+                    // Tint based on diet/danger
+                    if (enemy.isCarnivore) enemy.setTint(0xff4444);
+                    else enemy.setTint(0x44ff44);
+
+                    enemy.setCollideWorldBounds(true);
+                    enemy.setBounce(1);
+
+                    // Initial movement
+                    const speed = 100 / sizeTier; // Smaller = faster
+                    enemy.setVelocity(Phaser.Math.Between(-speed, speed), Phaser.Math.Between(-speed, speed));
+                }
+            }
+
+            eatFood(playerContainer, food) {
+                // Check Diet Compatibility
+                // Player is a Container, but the overlap passes the container because we enabled physics on it.
+                // Wait, overlap passes the individual GameObjects if physics is on children,
+                // BUT we enabled physics on the Container itself.
+
+                // Diet Check
+                let canEat = false;
+                if (selectedDiet === 'herbivore' && food.foodType === 'herbivore') canEat = true;
+                if (selectedDiet === 'carnivore' && food.foodType === 'carnivore') canEat = true;
+
+                if (canEat) {
+                    // Eat Effect
+                    food.disableBody(true, true); // Hide and disable
+
+                    // Gain DNA
+                    this.dna += 1; // Base gain
+                    this.growPlayer(0.5); // Small growth
+
+                    // Respawn food elsewhere
+                    const x = Phaser.Math.Between(0, WORLD_SIZE);
+                    const y = Phaser.Math.Between(0, WORLD_SIZE);
+                    food.enableBody(true, x, y, true, true);
+
+                    // Update UI
+                    this.updateUI();
+                }
+            }
+
+            handleEnemyCollision(playerContainer, enemy) {
+                // Debounce collision slightly? No, overlap triggers every frame.
+                // We need to act instantly.
+
+                // Check Size Advantage
+                if (this.playerMass > enemy.mass * 1.2) {
+                    // Player is significantly bigger -> EAT
+
+                    // Check if Carnivore (Herbivores can't eat enemies? Spore rules say Carnivores eat meat/enemies)
+                    // Let's say ONLY Carnivores eat enemies.
+                    // Or maybe Herbivores can eat small plants-like enemies? No, let's stick to diet.
+                    // If selectedDiet is Herbivore, maybe they just bounce?
+                    // USER REQUIREMENT: "Carnivores eat Red food + Smaller enemies."
+
+                    if (selectedDiet === 'carnivore') {
+                         enemy.disableBody(true, true);
+                         this.dna += 10;
+                         this.growPlayer(enemy.mass * 0.2); // Gain 20% of enemy mass
+
+                         // Respawn Enemy
+                         const x = Phaser.Math.Between(0, WORLD_SIZE);
+                         const y = Phaser.Math.Between(0, WORLD_SIZE);
+                         enemy.enableBody(true, x, y, true, true);
+                         this.updateUI();
+                    } else {
+                        // Herbivore hitting smaller enemy -> Just push it
+                        const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, enemy.x, enemy.y);
+                        enemy.setVelocity(Math.cos(angle) * 300, Math.sin(angle) * 300);
+                    }
+
+                } else if (enemy.mass > this.playerMass * 1.1) {
+                    // Enemy is Bigger -> HURT
+                    // Only if Enemy is Carnivore or aggressive?
+                    // Let's assume big things hurt if you bump them.
+
+                    // Bounce Player Back
+                    const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+                    this.player.body.setVelocity(Math.cos(angle) * 500, Math.sin(angle) * 500);
+
+                    // Flash Red
+                    this.player.bodySprite.setTint(0xff0000);
+                    this.time.delayedCall(200, () => {
+                         if (selectedDiet === 'carnivore') this.player.bodySprite.setTint(0xffaaaa);
+                         else this.player.bodySprite.setTint(0xaaffaa);
+                    });
+
+                    // Lose Mass/DNA
+                    this.dna = Math.max(0, this.dna - 5);
+                    // Shrink? Maybe too punishing. Just DNA loss.
+
+                    this.updateUI();
+                }
+            }
+
+            updateEnemies() {
+                if (!this.enemyGroup) return;
+
+                this.enemyGroup.children.iterate((enemy) => {
+                    if (!enemy.active) return;
+
+                    // Simple AI
+                    // 1. Wander if no target
+                    if (Math.random() < 0.01) {
+                         const speed = 100 / enemy.scaleX;
+                         enemy.setVelocity(Phaser.Math.Between(-speed, speed), Phaser.Math.Between(-speed, speed));
+                    }
+
+                    // 2. Seek Player (If Carnivore and Bigger)
+                    if (enemy.isCarnivore && enemy.mass > this.playerMass) {
+                        const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+                        if (dist < 500) {
+                            // Chase!
+                            this.physics.moveToObject(enemy, this.player, 120 / enemy.scaleX);
+                        }
+                    }
+
+                    // Rotation
+                    if (enemy.body.velocity.x !== 0 || enemy.body.velocity.y !== 0) {
+                        enemy.rotation = enemy.body.velocity.angle() + Math.PI/2;
+                    }
+                });
+            }
+
+            createPlayer() {
+                // Player is a Container to hold body + parts
+                // Actually, for physics simplification, let's use a Sprite and add children if needed,
+                // or just draw parts on top.
+                // For Arcade physics, a single Sprite is best. We can use a Container but physics on Containers can be tricky.
+                // Let's use a Container with a Physics Body.
+
+                this.player = this.add.container(WORLD_SIZE / 2, WORLD_SIZE / 2);
+                this.physics.world.enable(this.player);
+
+                // Body
+                const bodySprite = this.add.sprite(0, 0, 'player_base');
+                this.player.add(bodySprite);
+                this.player.bodySprite = bodySprite; // Reference for tinting
+
+                // Physics body sizing
+                this.player.body.setCircle(24); // Based on visual size
+                this.player.body.setOffset(-24, -24); // Center the body
+                this.player.body.setCollideWorldBounds(false); // We handle bounds manually for "Soft Bounce"
+                this.player.body.setDrag(100);
+
+                this.player.depth = 10;
+
+                // Set Diet Color Hint (only if no custom tint)
+                if (this.playerTint === 0xffffff) {
+                    if (selectedDiet === 'carnivore') {
+                        this.playerTint = 0xffaaaa;
+                    } else {
+                        this.playerTint = 0xaaffaa;
+                    }
+                }
+                bodySprite.setTint(this.playerTint);
+            }
+
+            createJoystickGraphics() {
+                this.joystickBase = this.add.circle(0, 0, 50, 0xffffff, 0.1).setScrollFactor(0).setDepth(100).setVisible(false);
+                this.joystickStick = this.add.circle(0, 0, 25, 0x00ffff, 0.5).setScrollFactor(0).setDepth(100).setVisible(false);
+            }
+
+            handleJoystickMove(pointer) {
+                const angle = Phaser.Math.Angle.Between(this.touchStartPoint.x, this.touchStartPoint.y, pointer.x, pointer.y);
+                const distance = Phaser.Math.Distance.Between(this.touchStartPoint.x, this.touchStartPoint.y, pointer.x, pointer.y);
+                const maxDistance = 50;
+
+                // Clamp stick position
+                const stickDist = Math.min(distance, maxDistance);
+                this.joystickStick.x = this.touchStartPoint.x + Math.cos(angle) * stickDist;
+                this.joystickStick.y = this.touchStartPoint.y + Math.sin(angle) * stickDist;
+
+                // Apply Velocity
+                const speed = this.playerSpeed;
+                const velocityX = Math.cos(angle) * speed;
+                const velocityY = Math.sin(angle) * speed;
+
+                this.player.body.setVelocity(velocityX, velocityY);
+
+                // Rotate Player to face movement
+                this.player.rotation = angle + Math.PI / 2; // +90deg because sprite faces UP
+
+                // Jelly Movement Effect (Stretch)
+                // Stretch along Y (direction of movement), Squish X
+                const stretch = Math.min(1.2, 1 + (stickDist / maxDistance) * 0.2);
+                const squish = Math.max(0.8, 1 - (stickDist / maxDistance) * 0.2);
+
+                // Note: We need to apply this to the internal sprite, not the container,
+                // otherwise physics body scales too which might be weird,
+                // OR we accept physics body scaling.
+                // Let's scale the internal sprites.
+                this.player.each(child => {
+                     // Simple check to avoid scaling parts weirdly if we add them later
+                     if(child.texture && child.texture.key === 'player_base') {
+                         child.setScale(squish, stretch);
+                     }
+                });
+            }
+
+            update() {
+                if (!this.player) return;
+
+                // 1. Soft World Boundaries
+                const x = this.player.x;
+                const y = this.player.y;
+                const margin = 50;
+
+                if (x < margin) this.player.body.velocity.x = Math.abs(this.player.body.velocity.x) + 50;
+                if (x > WORLD_SIZE - margin) this.player.body.velocity.x = -Math.abs(this.player.body.velocity.x) - 50;
+                if (y < margin) this.player.body.velocity.y = Math.abs(this.player.body.velocity.y) + 50;
+                if (y > WORLD_SIZE - margin) this.player.body.velocity.y = -Math.abs(this.player.body.velocity.y) - 50;
+
+                // 2. Parallax Backgrounds
+                // TilePosition is based on camera scroll
+                this.bgDeep.tilePositionX = this.cameras.main.scrollX * 0.1;
+                this.bgDeep.tilePositionY = this.cameras.main.scrollY * 0.1;
+
+                this.bgMid.tilePositionX = this.cameras.main.scrollX * 0.5;
+                this.bgMid.tilePositionY = this.cameras.main.scrollY * 0.5;
+
+                // 3. Camera Zoom based on Size
+                // Target zoom decreases as player grows
+                // Base size = 10 mass. Max expected ~1000?
+                // Scale factor: roughly 1 / (scale^0.5)
+                const targetZoom = Math.max(0.2, 1 / (this.playerScale * 0.8));
+                this.cameras.main.setZoom(Phaser.Math.Linear(this.cameras.main.zoom, targetZoom, 0.01));
+
+                // 4. Update AI
+                this.updateEnemies();
+            }
+
+            updateUI() {
+                // Update HTML Overlay
+                const scoreText = document.getElementById('score-display');
+                if (scoreText) scoreText.innerText = `MASS: ${Math.floor(this.playerMass)}`;
+
+                const dnaFill = document.getElementById('dna-bar-fill');
+                const percent = Math.min(100, (this.dna / this.maxDna) * 100);
+                if (dnaFill) dnaFill.style.width = `${percent}%`;
+
+                // Show Evolution Menu if ready
+                if (this.dna >= this.maxDna) {
+                    // Only show if not already shown
+                    const evoMenu = document.getElementById('evo-menu');
+                    if (evoMenu.classList.contains('hidden')) {
+                        evoMenu.classList.remove('hidden');
+                        this.scene.pause(); // Pause Game
+                    }
+                }
+            }
+
+            handleEvolution(type) {
+                // Apply Upgrade
+                if (type === 'speed') {
+                    this.hasFins = true;
+                    this.playerSpeed += 50;
+                    this.addFinsVisual();
+                } else if (type === 'attack') {
+                    this.hasSpikes = true;
+                    this.addSpikesVisual();
+                } else if (type === 'color') {
+                    // Random Vibrant Color
+                    const colors = [0xff00ff, 0x00ffff, 0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xffaa00];
+                    this.playerTint = Phaser.Math.RND.pick(colors);
+                    this.player.bodySprite.setTint(this.playerTint);
+
+                    // Also grow a bit for fun
+                    this.growPlayer(10);
+                }
+
+                // Reset DNA
+                this.dna = 0;
+                this.maxDna = Math.floor(this.maxDna * 1.5); // Harder next time
+                this.updateUI();
+                this.saveGameData();
+            }
+
+            growPlayer(amount) {
+                this.playerMass += amount;
+
+                // Calculate Scale: Area is proportional to mass.
+                // Scale = sqrt(Mass / BaseMass)
+                const newScale = Math.sqrt(this.playerMass / 10);
+                this.playerScale = newScale;
+
+                // Tween scale
+                this.tweens.add({
+                    targets: this.player,
+                    scaleX: newScale,
+                    scaleY: newScale,
+                    duration: 500,
+                    ease: 'Back.out'
+                });
+
+                // Update Physics Body size
+                // We need to scale the radius. Original radius 24.
+                this.player.body.setCircle(24 * newScale);
+                this.player.body.setOffset(-24 * newScale, -24 * newScale);
+            }
+
+            addFinsVisual() {
+                 // Check if already has fins visually to avoid duplicates
+                 // Simple check: do we have children with 'part_fin' texture?
+                 // But we can just add more for "level 2" fins!
+
+                 const offset = this.player.list.length * 2; // Slight offset for stacking
+
+                 const finLeft = this.add.sprite(-30 - offset, 10 + offset, 'part_fin');
+                 finLeft.setRotation(-Math.PI / 4);
+                 finLeft.setTint(0x00ffff);
+                 this.player.addAt(finLeft, 0); // Add behind body
+
+                 const finRight = this.add.sprite(30 + offset, 10 + offset, 'part_fin');
+                 finRight.setRotation(Math.PI / 4);
+                 finRight.setFlipX(true);
+                 finRight.setTint(0x00ffff);
+                 this.player.addAt(finRight, 0);
+            }
+
+            addSpikesVisual() {
+                const offset = this.player.list.length * 2;
+                const spike = this.add.sprite(0, -32 - offset, 'part_spike');
+                spike.setTint(0xff0000);
+                this.player.add(spike);
+            }
+
+            saveGameData() {
+                const data = {
+                    mass: this.playerMass,
+                    speed: this.playerSpeed,
+                    dna: this.dna,
+                    maxDna: this.maxDna,
+                    diet: selectedDiet,
+                    hasFins: this.hasFins,
+                    hasSpikes: this.hasSpikes,
+                    tint: this.playerTint
+                };
+                localStorage.setItem('jelly_evo_save', JSON.stringify(data));
+                console.log("Game Saved");
+            }
+
+            loadGameData() {
+                const json = localStorage.getItem('jelly_evo_save');
+                if (json) {
+                    const data = JSON.parse(json);
+
+                    // Restore Stats
+                    this.playerMass = data.mass;
+                    this.playerSpeed = data.speed;
+                    this.dna = data.dna;
+                    this.maxDna = data.maxDna;
+                    selectedDiet = data.diet; // Global variable
+                    this.playerTint = data.tint;
+
+                    // Restore Visuals
+                    this.growPlayer(0); // Updates scale based on mass
+                    this.player.bodySprite.setTint(this.playerTint);
+
+                    if (data.hasFins) {
+                        this.hasFins = true;
+                        this.addFinsVisual();
+                    }
+                    if (data.hasSpikes) {
+                        this.hasSpikes = true;
+                        this.addSpikesVisual();
+                    }
+
+                    this.updateUI();
+                    console.log("Game Loaded");
+                }
+            }
+        }
+
+        // --- PHASER CONFIG ---
+        const config = {
+            type: Phaser.AUTO,
+            width: window.innerWidth,
+            height: window.innerHeight - 50,
+            parent: 'game-container',
+            backgroundColor: '#000510',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: [BootScene, MainScene, GameScene],
+            scale: {
+                mode: Phaser.Scale.RESIZE,
+                autoCenter: Phaser.Scale.CENTER_HORIZONTALLY
+            }
+        };
+
+        // Initialize Game
+        gameInstance = new Phaser.Game(config);
+
+        // --- UI FUNCTIONS ---
+
+        // Check for save data on load
+        window.onload = () => {
+             const savedData = localStorage.getItem('jelly_evo_save');
+             if (savedData) {
+                 document.getElementById('continue-btn-container').style.display = 'block';
+             }
+        };
+
+        // Global UI functions
+        window.startGame = (diet) => {
+            selectedDiet = diet;
+            // Clear old save if starting new
+            localStorage.removeItem('jelly_evo_save');
+
+            console.log('Starting game as ' + diet);
+            document.getElementById('start-menu').classList.add('hidden');
+
+            // Get the MainScene and trigger start
+            const mainScene = gameInstance.scene.getScene('MainScene');
+            if (mainScene) {
+                mainScene.startGameLogic();
+            }
+        };
+
+        window.continueGame = () => {
+             console.log('Continuing game...');
+             document.getElementById('start-menu').classList.add('hidden');
+
+             // Get the MainScene and trigger start with load flag
+             const mainScene = gameInstance.scene.getScene('MainScene');
+             if (mainScene) {
+                 // We need to pass a flag to GameScene to load data
+                 window.shouldLoadGame = true;
+                 mainScene.startGameLogic();
+             }
+        };
+
+        window.evolve = (type) => {
+            console.log('Evolving: ' + type);
+            document.getElementById('evo-menu').classList.add('hidden');
+
+             const gameScene = gameInstance.scene.getScene('GameScene');
+             if (gameScene && gameScene.handleEvolution) {
+                 gameScene.handleEvolution(type);
+             }
+             // Resume game
+             gameInstance.scene.resume('GameScene');
+        };
+
+    </script>
+</body>
+</html>
