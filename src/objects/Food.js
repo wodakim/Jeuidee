@@ -11,18 +11,24 @@ export default class Food {
 
         // Physics Body
         this.body = this.scene.matter.add.circle(this.x, this.y, this.radius, {
-            isSensor: true,
+            isSensor: true, // Non-blocking collision
             label: 'Food',
             frictionAir: 0.1
         });
 
         this.body.gameObject = this;
 
-        // Visuals
+        // Optimization: Use Image (Texture) instead of Graphics if possible
+        // But since we generate procedurally, we stick to graphics for now but static.
+        // We will NOT redraw in update().
+
         this.graphics = this.scene.add.graphics();
         this.draw();
 
-        // Float Tween
+        // Optimization: Reduce tween overhead?
+        // Maybe group them or use a simpler update logic?
+        // For now, tweens are okay, but let's reduce the count if we have 100 food items.
+        // Let's only tween if near player? No, simpler to just tween.
         this.floatTween = this.scene.tweens.add({
             targets: this.body.position,
             y: this.y + 10,
@@ -42,6 +48,7 @@ export default class Food {
     }
 
     update() {
+        // Optimization: Only update graphics position
         if (this.body && this.graphics) {
             this.graphics.setPosition(this.body.position.x, this.body.position.y);
         }

@@ -7,7 +7,7 @@ export default class JellyPlayer {
         this.y = y;
 
         // Configuration
-        this.sides = options.sides || 16;
+        this.sides = options.sides || 12; // Reduce from 16 to 12 for performance
         this.baseRadius = options.radius || 40;
         this.radius = this.baseRadius;
         this.currentScale = 1.0;
@@ -99,7 +99,6 @@ export default class JellyPlayer {
 
     applyForce(force) {
         // Apply force to the central body
-        // Scale force by current mass/scale?
         const forceMagnitude = 1.5 * this.currentScale; // More force for bigger body
 
         this.scene.matter.body.applyForce(this.centralBody, this.centralBody.position, {
@@ -121,7 +120,6 @@ export default class JellyPlayer {
         this.radius = this.baseRadius * this.currentScale;
 
         // Scale Bodies (Particles)
-        // Matter.Body.scale(body, x, y) scales relative to current size
         const { Body } = Phaser.Physics.Matter.Matter;
         Body.scale(this.centralBody, scaleRatio, scaleRatio);
         this.outerBodies.forEach(b => Body.scale(b, scaleRatio, scaleRatio));
@@ -130,13 +128,11 @@ export default class JellyPlayer {
         const constraints = this.composite.constraints;
 
         // Center -> Outer (Spokes)
-        // The first 'this.sides' constraints are the spokes
         for (let i = 0; i < this.sides; i++) {
             constraints[i].length = this.radius;
         }
 
         // Outer -> Outer (Perimeter)
-        // The next 'this.sides' constraints are the skin
         const angleStep = (Math.PI * 2) / this.sides;
         const newPerimeterDist = 2 * this.radius * Math.sin(angleStep / 2);
 
@@ -145,17 +141,6 @@ export default class JellyPlayer {
         }
 
         console.log(`Jelly grew! New Scale: ${this.currentScale.toFixed(2)}`);
-
-        // Pop Animation (Visual Only)
-        this.scene.tweens.addCounter({
-            from: 1.2,
-            to: 1,
-            duration: 200,
-            onUpdate: (tween) => {
-                // Could act as a momentary visual scale multiplier if we decoupled physics/rendering
-                // For now, physics change is enough "pop"
-            }
-        });
     }
 
     update() {
