@@ -24,7 +24,7 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
     *   Camera Zoom-out on growth (The "Gigantism" effect foundation).
     *   Soft World Boundaries.
 
-### Phase 2: Organic Life & Ecosystem (Current Goal)
+### Phase 2: Organic Life & Ecosystem (COMPLETED)
 *   **Soft-Body Physics ("The Jelly Engine"):**
     *   Replace static circles with dynamic polygons (Spring-mass system).
     *   Deformation based on velocity and impact.
@@ -39,24 +39,29 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
     *   Particle system for eating/combat.
     *   Physics-based knockback (No Screen Shake).
 
-### Phase 3: Evolution & Complexity
-*   **Editor:** A simple UI to spend DNA points on parts (Spikes, Fins, Mouths).
-*   **Parts System:**
-    *   Modular attachment system (parent/child hierarchy in JS objects).
-    *   Functional stats (Speed, Damage, Sight Radius).
-*   **Layered World:**
-    *   Parallax backgrounds with varying depth.
-    *   Transition logic: As player grows past a threshold, the background shifts to imply deeper/larger ocean layers.
+### Phase 3: Deep Evolution & Atmosphere (Current Goal)
+*   **Abyssal Atmosphere:**
+    *   Multi-layer Parallax (Deep blur blobs, Midground bubbles).
+    *   Removal of debug grid.
+*   **Creature Editor Engine (The "Spore" Core):**
+    *   **Vertebrae System:** Player is no longer a single circle but a spine of interconnected nodes (vertebrae).
+    *   **Skinning:** Procedural hull generation around the spine (Metaballs/Convex Hull).
+    *   **Parts Placement:** Drag-and-drop placement of parts (Spikes, Fins) onto the skin surface.
+    *   **Mirror Mode:** Option to symmetry parts.
+*   **Evolution UI:**
+    *   Full-screen "Editor Mode" overlay.
+    *   Sliders for vertebra size/position.
+    *   Palette for parts.
 
 ### Phase 4: Audio & Polish
 *   **Procedural Audio:** (Optional) Web Audio API to generate simple ambient sounds and SFX.
 *   **Optimization:** Object pooling for particles and food to maintain 60FPS on mobile.
-*   **Save System:** Robust `localStorage` implementation for game state persistence.
+*   **Save System:** Robust `localStorage` implementation for complex creature data (spine + parts).
 
 ## Architecture (Technical)
 *   **`Game` Class:** Manages the loop, state, and high-level systems.
+*   **`Creature` Class:** Replaces simple `SoftBody`. Contains `spine[]` and `skin`.
+*   **`Vertebra` Class:** A node in the spine with position and radius.
 *   **`Renderer` Class:** Handles the Canvas context and drawing primitives.
-*   **`SoftBody` Class:** Handles vertex/spring physics for organic entities.
 *   **`Input` Class:** Abstraction for Mouse/Touch events.
-*   **`Entity` Class:** Base class for all game objects (Position, Velocity, Radius).
 *   **`Vector2` Utility:** Simple math helper for physics calculations.
