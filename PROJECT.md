@@ -11,7 +11,7 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
 
 ## Roadmap
 
-### Phase 1: The "Playable Skeleton" (Current Goal)
+### Phase 1: The "Playable Skeleton" (COMPLETED)
 *   **Core Engine:** Implement a robust `GameLoop` with delta time handling.
 *   **Rendering:** Setup a flexible `CanvasRenderer` with support for camera transformations (Zoom/Pan).
 *   **Input:** Multi-touch capable Virtual Joystick.
@@ -24,18 +24,20 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
     *   Camera Zoom-out on growth (The "Gigantism" effect foundation).
     *   Soft World Boundaries.
 
-### Phase 2: Advanced "Bio-Engine" Visuals
-*   **Soft-Body Physics:**
-    *   Replace static circles with dynamic polygons (vertices).
-    *   Implement mass-spring systems for "jelly" wobble on movement and impact.
-*   **Lighting:**
-    *   Use `shadowBlur` for neon glow.
-    *   Implement additive color blending (`globalCompositeOperation = 'lighter'`).
-*   **Particles:**
-    *   Trail effects for player movement.
-    *   Burst effects on eating/damage.
-*   **Procedural Textures:**
-    *   Generate internal cell details (nucleus, organelles) via noise/patterns.
+### Phase 2: Organic Life & Ecosystem (Current Goal)
+*   **Soft-Body Physics ("The Jelly Engine"):**
+    *   Replace static circles with dynamic polygons (Spring-mass system).
+    *   Deformation based on velocity and impact.
+    *   Idle "breathing" animation.
+*   **Advanced Rendering:**
+    *   Additive color blending (`lighter`) for intense neon glow.
+    *   Internal cell details (Nucleus, organelles) with parallax movement.
+*   **Ecosystem (AI):**
+    *   Distinct Enemy Types: Aggressors (Spiky) vs Grazers (Round).
+    *   Steering Behaviors: Seek, Flee, Wander, Flock.
+*   **Juiciness:**
+    *   Particle system for eating/combat.
+    *   Physics-based knockback (No Screen Shake).
 
 ### Phase 3: Evolution & Complexity
 *   **Editor:** A simple UI to spend DNA points on parts (Spikes, Fins, Mouths).
@@ -54,8 +56,7 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
 ## Architecture (Technical)
 *   **`Game` Class:** Manages the loop, state, and high-level systems.
 *   **`Renderer` Class:** Handles the Canvas context and drawing primitives.
+*   **`SoftBody` Class:** Handles vertex/spring physics for organic entities.
 *   **`Input` Class:** Abstraction for Mouse/Touch events.
 *   **`Entity` Class:** Base class for all game objects (Position, Velocity, Radius).
-    *   `Player` extends `Entity`
-    *   `Food` extends `Entity`
 *   **`Vector2` Utility:** Simple math helper for physics calculations.

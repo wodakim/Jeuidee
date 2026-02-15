@@ -338,7 +338,8 @@
                 diet: 'herbivore',
                 dna: 0,
                 maxDna: 100,
-                upgrades: { fins: 0, spikes: 0 }
+                upgrades: { fins: 0, spikes: 0 },
+                body: null // SoftBody instance
             },
 
             // Camera
@@ -382,8 +383,191 @@
             lerp: (a, b, t) => a + (b - a) * t,
             clamp: (val, min, max) => Math.min(Math.max(val, min), max),
             dist: (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1),
-            randomRange: (min, max) => Math.random() * (max - min) + min
+            randomRange: (min, max) => Math.random() * (max - min) + min,
+            angleDist: (a, b) => {
+                const p = Math.PI * 2;
+                return (b - a + p) % p;
+            }
         };
+
+        // --- PARTICLE SYSTEM ---
+        class ParticleSystem {
+            constructor() {
+                this.particles = [];
+            }
+
+            emit(x, y, color, count = 10, speed = 100) {
+                for(let i=0; i<count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const v = Math.random() * speed;
+                    this.particles.push({
+                        x: x, y: y,
+                        vx: Math.cos(angle) * v,
+                        vy: Math.sin(angle) * v,
+                        life: 1.0,
+                        color: color,
+                        size: Math.random() * 3 + 1
+                    });
+                }
+            }
+
+            update(dt) {
+                for(let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.x += p.vx * dt;
+                    p.y += p.vy * dt;
+                    p.life -= dt * 2; // Fade out speed
+
+                    if (p.life <= 0) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                for(const p of this.particles) {
+                    ctx.globalAlpha = p.life;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        const particles = new ParticleSystem();
+
+        // --- SOFT BODY ENGINE ---
+        class SoftBody {
+            constructor(radius, segments = 12, stiffness = 5, damping = 0.5) {
+                this.radius = radius;
+                this.baseRadius = radius;
+                this.segments = segments;
+                this.points = [];
+                this.stiffness = stiffness;
+                this.damping = damping;
+                this.wobblePhase = Math.random() * Math.PI * 2;
+
+                // Init points
+                for(let i=0; i<segments; i++) {
+                    const angle = (i / segments) * Math.PI * 2;
+                    this.points.push({
+                        x: Math.cos(angle) * radius,
+                        y: Math.sin(angle) * radius,
+                        vx: 0,
+                        vy: 0,
+                        baseX: Math.cos(angle) * radius,
+                        baseY: Math.sin(angle) * radius,
+                        angle: angle
+                    });
+                }
+            }
+
+            update(dt, velocityX, velocityY, mass) {
+                // Idle Wobble (Breathing)
+                this.wobblePhase += dt * 2;
+                const breath = Math.sin(this.wobblePhase) * 2;
+
+                // Velocity Deformation (Squash/Stretch)
+                // If moving fast, stretch along velocity vector
+                const speed = Math.hypot(velocityX, velocityY);
+                const angle = Math.atan2(velocityY, velocityX);
+                const stretchFactor = Math.min(speed / 300, 0.3); // Cap stretch
+
+                for(let i=0; i<this.segments; i++) {
+                    const p = this.points[i];
+
+                    // 1. Target Position (Base Shape + Breathing)
+                    let tx = p.baseX * (1 + breath * 0.05 / (mass * 0.1));
+                    let ty = p.baseY * (1 + breath * 0.05 / (mass * 0.1));
+
+                    // 2. Apply Deformation (Stretch along movement)
+                    // Rotate point to align with movement direction
+                    // Simple hack: Just pull points that are "behind" slightly
+                    // Better: Elliptical transform?
+                    // Let's stick to Spring Physics:
+                    // Inertia: Points lag behind movement
+
+                    // Spring Force: Pull towards target (tx, ty)
+                    const ax = (tx - p.x) * this.stiffness;
+                    const ay = (ty - p.y) * this.stiffness;
+
+                    // Inertia Force: Inverse of parent velocity
+                    // Points have "drag"
+                    const dragX = -velocityX * 0.05;
+                    const dragY = -velocityY * 0.05;
+
+                    p.vx += (ax + dragX) * dt;
+                    p.vy += (ay + dragY) * dt;
+
+                    // Damping
+                    p.vx *= (1 - this.damping * dt * 10); // drag
+                    p.vy *= (1 - this.damping * dt * 10);
+
+                    // Integrate
+                    p.x += p.vx * dt;
+                    p.y += p.vy * dt;
+                }
+            }
+
+            draw(ctx, x, y, color) {
+                // Main Body (Neon Glow)
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter'; // Additive blending for glow
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 20;
+                ctx.fillStyle = color;
+
+                // Construct path
+                ctx.beginPath();
+                const gx = (i) => x + this.points[i].x;
+                const gy = (i) => y + this.points[i].y;
+
+                // Smooth loop
+                ctx.moveTo((gx(0) + gx(this.segments-1))/2, (gy(0) + gy(this.segments-1))/2);
+                for(let i=0; i<this.segments; i++) {
+                    const next = (i + 1) % this.segments;
+                    const mx = (gx(i) + gx(next)) / 2;
+                    const my = (gy(i) + gy(next)) / 2;
+                    ctx.quadraticCurveTo(gx(i), gy(i), mx, my);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+
+                // Internal Details (Nucleus/Organelles) - Parallax effect
+                ctx.save();
+                ctx.globalCompositeOperation = 'source-over'; // Standard draw on top
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+
+                // Calculate "lag" position for nucleus
+                // Based on average point deformation vs center
+                let avgX = 0, avgY = 0;
+                this.points.forEach(p => { avgX += p.x; avgY += p.y; });
+                avgX /= this.segments;
+                avgY /= this.segments;
+
+                // Nucleus
+                ctx.beginPath();
+                ctx.arc(x + avgX * 0.5, y + avgY * 0.5, this.radius * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Small organelles
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                for(let i=0; i<3; i++) {
+                    const angle = (i / 3) * Math.PI * 2 + this.wobblePhase;
+                    const ox = x + avgX * 0.8 + Math.cos(angle) * this.radius * 0.5;
+                    const oy = y + avgY * 0.8 + Math.sin(angle) * this.radius * 0.5;
+                    ctx.beginPath();
+                    ctx.arc(ox, oy, this.radius * 0.15, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
 
         // --- INPUT HANDLING ---
         function setupInput() {
@@ -451,6 +635,9 @@
         }
 
         function update(dt) {
+            // Update Particles
+            particles.update(dt);
+
             // 1. Player Movement
             if (state.input.active) {
                 const speed = state.player.speed;
@@ -474,6 +661,20 @@
             state.player.x = MathUtils.clamp(state.player.x, 0, WORLD_SIZE);
             state.player.y = MathUtils.clamp(state.player.y, 0, WORLD_SIZE);
 
+            // Soft Body Update
+            // Resize if mass changed
+            const scaleFactor = Math.sqrt(state.player.mass / 10);
+            const targetRadius = CELL_BASE_RADIUS * scaleFactor;
+
+            // Re-init body if significantly different (or init for first time)
+            if (!state.player.body || Math.abs(state.player.body.baseRadius - targetRadius) > 1) {
+                // Keep old wobble if exists to prevent snap? Nah, simple reset is cleaner for now
+                // Actually, let's just scale points? No, re-gen is safer.
+                state.player.body = new SoftBody(targetRadius, 16, 8, 0.8);
+            }
+            state.player.radius = targetRadius;
+            state.player.body.update(dt, state.player.vx, state.player.vy, state.player.mass);
+
             // 2. Camera Follow
             // Target Position: Center on player
             const targetCamX = state.player.x - (canvas.width / 2) / state.camera.zoom;
@@ -483,10 +684,6 @@
             state.camera.y = MathUtils.lerp(state.camera.y, targetCamY, 5 * dt);
 
             // Zoom based on size (Gigantism Effect)
-            // Scale inversely proportional to player radius growth
-            const scaleFactor = Math.sqrt(state.player.mass / 10);
-            state.player.radius = CELL_BASE_RADIUS * scaleFactor;
-
             state.camera.targetZoom = Math.max(0.2, 1 / (scaleFactor * 0.8));
             state.camera.zoom = MathUtils.lerp(state.camera.zoom, state.camera.targetZoom, 2 * dt);
 
@@ -503,6 +700,9 @@
                     if (state.player.diet === 'carnivore' && f.type === 'meat') canEat = true;
 
                     if (canEat) {
+                        // Particle FX
+                        particles.emit(f.x, f.y, f.type === 'plant' ? '#00ff00' : '#ff0000', 5, 50);
+
                         state.foods.splice(i, 1);
                         state.player.mass += 0.5;
                         state.player.dna += 1;
@@ -510,6 +710,46 @@
 
                         // Spawn replacement
                         spawnFood(1);
+                    }
+                }
+            }
+
+            // 4. Update & Draw Enemies + Collisions
+            for (let i = state.enemies.length - 1; i >= 0; i--) {
+                const e = state.enemies[i];
+                e.update(dt);
+
+                // Collision with Player
+                const d = MathUtils.dist(state.player.x, state.player.y, e.x, e.y);
+                if (d < state.player.radius + e.radius) {
+                    // Player Larger?
+                    if (state.player.mass > e.mass * 1.1) {
+                        // Eat Enemy (if Carnivore or just dominance?)
+                        // "Carnivores eat Red food + Smaller enemies"
+                        if (state.player.diet === 'carnivore') {
+                            // Splat FX
+                            particles.emit(e.x, e.y, e.color, 15, 150);
+
+                            state.enemies.splice(i, 1);
+                            state.player.mass += e.mass * 0.2;
+                            state.player.dna += 10;
+                            updateUI();
+                            spawnEnemies(1);
+                        } else {
+                            // Herbivore Push
+                            const angle = Math.atan2(e.y - state.player.y, e.x - state.player.x);
+                            e.vx = Math.cos(angle) * 300;
+                            e.vy = Math.sin(angle) * 300;
+                        }
+                    }
+                    else if (e.mass > state.player.mass * 1.1) {
+                        // Player Smaller -> Take Damage / Knockback
+                        const angle = Math.atan2(state.player.y - e.y, state.player.x - e.x);
+                        state.player.vx = Math.cos(angle) * 400;
+                        state.player.vy = Math.sin(angle) * 400;
+
+                        // Hurt (Lose DNA/Mass)
+                        // Simple flash handled in draw? We need state.
                     }
                 }
             }
@@ -561,14 +801,17 @@
                 ctx.shadowBlur = 0; // Reset
             });
 
-            // Draw Player
-            ctx.fillStyle = state.player.color;
-            ctx.shadowColor = state.player.color;
-            ctx.shadowBlur = 20;
+            // Draw Enemies
+            state.enemies.forEach(e => e.draw(ctx));
 
-            ctx.beginPath();
-            ctx.arc(state.player.x, state.player.y, state.player.radius, 0, Math.PI * 2);
-            ctx.fill();
+            // Draw Particles (Under player?)
+            particles.draw(ctx);
+
+            // Draw Player (Soft Body)
+            if (state.player.body) {
+                // Remove redundant shadow setting here, moved to SoftBody.draw
+                state.player.body.draw(ctx, state.player.x, state.player.y, state.player.color);
+            }
 
             // Draw Eyes (Direction)
             const eyeOffset = state.player.radius * 0.6;
@@ -583,6 +826,7 @@
             const ry = state.player.y + Math.sin(angle + 0.5) * eyeOffset;
 
             ctx.fillStyle = '#fff';
+            ctx.shadowBlur = 0; // Reset for eyes
             ctx.beginPath();
             ctx.arc(lx, ly, state.player.radius * 0.25, 0, Math.PI * 2);
             ctx.arc(rx, ry, state.player.radius * 0.25, 0, Math.PI * 2);
@@ -622,6 +866,131 @@
             }
         }
 
+        // --- ENTITY CLASSES ---
+        class Enemy {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type; // 'aggressor' or 'grazer'
+                this.radius = MathUtils.randomRange(15, 30);
+                this.mass = (this.radius / CELL_BASE_RADIUS) * 10;
+                this.speed = this.type === 'aggressor' ? 150 : 100;
+                this.color = this.type === 'aggressor' ? '#ff0055' : '#00aaff';
+                this.vx = 0;
+                this.vy = 0;
+
+                // Soft Body
+                this.body = new SoftBody(this.radius, this.type === 'aggressor' ? 8 : 12, 5, 0.5);
+
+                // AI State
+                this.state = 'wander';
+                this.stateTimer = 0;
+                this.targetX = x;
+                this.targetY = y;
+            }
+
+            update(dt) {
+                // AI Logic (Steering)
+                this.stateTimer -= dt;
+                if (this.stateTimer <= 0) {
+                    this.pickNewState();
+                }
+
+                let steerX = 0, steerY = 0;
+
+                if (this.state === 'wander') {
+                    // Simple wander: seek random point
+                    const dx = this.targetX - this.x;
+                    const dy = this.targetY - this.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < 50) this.pickNewState(); // Reached target
+
+                    steerX = dx / dist * this.speed;
+                    steerY = dy / dist * this.speed;
+                }
+                else if (this.state === 'chase' && this.type === 'aggressor') {
+                    // Chase Player
+                    const dx = state.player.x - this.x;
+                    const dy = state.player.y - this.y;
+                    const dist = Math.hypot(dx, dy);
+                    steerX = dx / dist * (this.speed * 1.5); // Sprint
+                    steerY = dy / dist * (this.speed * 1.5);
+                }
+                else if (this.state === 'flee') {
+                    // Flee from Player
+                    const dx = this.x - state.player.x;
+                    const dy = this.y - state.player.y;
+                    const dist = Math.hypot(dx, dy);
+                    steerX = dx / dist * (this.speed * 1.2);
+                    steerY = dy / dist * (this.speed * 1.2);
+                }
+
+                // Apply Steering
+                this.vx = MathUtils.lerp(this.vx, steerX, 2 * dt);
+                this.vy = MathUtils.lerp(this.vy, steerY, 2 * dt);
+
+                // Update Position
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+
+                // World Bounds
+                if (this.x < 0 || this.x > WORLD_SIZE) this.vx *= -1;
+                if (this.y < 0 || this.y > WORLD_SIZE) this.vy *= -1;
+                this.x = MathUtils.clamp(this.x, 0, WORLD_SIZE);
+                this.y = MathUtils.clamp(this.y, 0, WORLD_SIZE);
+
+                // Update Body
+                this.body.update(dt, this.vx, this.vy, this.mass);
+            }
+
+            pickNewState() {
+                this.stateTimer = MathUtils.randomRange(2, 5);
+
+                const distToPlayer = MathUtils.dist(this.x, this.y, state.player.x, state.player.y);
+
+                if (this.type === 'aggressor') {
+                    // Chase if close and bigger
+                    if (distToPlayer < 400 && this.mass > state.player.mass) {
+                        this.state = 'chase';
+                    } else {
+                        this.state = 'wander';
+                        this.targetX = this.x + MathUtils.randomRange(-300, 300);
+                        this.targetY = this.y + MathUtils.randomRange(-300, 300);
+                    }
+                } else {
+                    // Grazer: Flee if close and smaller
+                    if (distToPlayer < 300 && this.mass < state.player.mass) {
+                        this.state = 'flee';
+                    } else {
+                        this.state = 'wander';
+                        this.targetX = this.x + MathUtils.randomRange(-300, 300);
+                        this.targetY = this.y + MathUtils.randomRange(-300, 300);
+                    }
+                }
+            }
+
+            draw(ctx) {
+                if (this.body) {
+                    this.body.draw(ctx, this.x, this.y, this.color);
+                }
+                // Eye (Simple)
+                const angle = Math.atan2(this.vy, this.vx);
+                const ex = this.x + Math.cos(angle) * this.radius * 0.5;
+                const ey = this.y + Math.sin(angle) * this.radius * 0.5;
+
+                ctx.fillStyle = '#fff';
+                ctx.shadowBlur = 0;
+                ctx.beginPath();
+                ctx.arc(ex, ey, this.radius * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(ex, ey, this.radius * 0.1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
         // --- SPAWNING ---
         function spawnFood(count) {
             for (let i = 0; i < count; i++) {
@@ -631,6 +1000,18 @@
                     radius: 5,
                     type: Math.random() > 0.5 ? 'plant' : 'meat'
                 });
+            }
+        }
+
+        function spawnEnemies(count) {
+            for (let i = 0; i < count; i++) {
+                const x = MathUtils.randomRange(0, WORLD_SIZE);
+                const y = MathUtils.randomRange(0, WORLD_SIZE);
+                // Avoid spawn on player
+                if (MathUtils.dist(x, y, state.player.x, state.player.y) < 500) continue;
+
+                const type = Math.random() > 0.4 ? 'grazer' : 'aggressor';
+                state.enemies.push(new Enemy(x, y, type));
             }
         }
 
@@ -655,7 +1036,9 @@
 
             // Spawn initial world
             state.foods = [];
+            state.enemies = [];
             spawnFood(300);
+            spawnEnemies(20);
 
             // Hide Menu, Start Loop
             document.getElementById('start-menu').classList.add('hidden');
