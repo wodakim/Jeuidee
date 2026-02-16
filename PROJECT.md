@@ -39,7 +39,7 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
     *   Particle system for eating/combat.
     *   Physics-based knockback (No Screen Shake).
 
-### Phase 3: Complex Life & Survival (Current Goal)
+### Phase 3: Complex Life & Survival (IN PROGRESS / REFINEMENT)
 *   **Advanced Creature Engine (Spine & Skin):**
     *   **Vertebrae:** Connected nodes with elastic constraints. Visible/Editable in Editor.
     *   **Metaball Skinning:** Smooth hull generation around variable-sized vertebrae.
@@ -53,6 +53,13 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
 *   **Herbivore Defense:**
     *   **Poison Glands:** Leave toxic trails.
     *   **Hiding Spots (Algae):** Safe zones for Herbivores, dangerous for Carnivores.
+
+### Bug Fixes & Refinements (Current Task)
+*   **Crash Fix:** Resolve `TypeError` on undefined SoftBody access.
+*   **Physics:** Implement "Snake-like" fluid spine movement (Verlet/IK).
+*   **Editor:** Fix Drag & Drop preview and interaction (Canvas overlay logic).
+*   **AI:** Fix passive enemies; Ensure they eat food and grow visually.
+*   **Atmosphere:** Add blurred "Deep Abyss" layer with giant shapes.
 
 ### Phase 4: Audio & Polish
 *   **Procedural Audio:** (Optional) Web Audio API to generate simple ambient sounds and SFX.
