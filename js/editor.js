@@ -27,21 +27,26 @@ export default class Editor {
         this.overlay.style.display = 'none';
         this.overlay.style.pointerEvents = 'none'; // Let clicks pass to canvas if needed
 
-        // HTML Content
+        // HTML Content with Classes
         this.overlay.innerHTML = `
-            <div style="position:absolute; bottom:20px; width:100%; display:flex; justify-content:center; gap:20px; pointer-events:auto;">
-                <button id="add-vertebra-btn" style="padding:15px 30px; background:#0ff; border:none; border-radius:30px; font-weight:bold; font-family:Orbitron; box-shadow:0 0 10px #0ff;">+ BONE</button>
-                <button id="close-editor-btn" style="padding:15px 30px; background:#f0f; border:none; border-radius:30px; font-weight:bold; font-family:Orbitron; box-shadow:0 0 10px #f0f;">PLAY</button>
+            <div class="editor-controls">
+                <button id="add-vertebra-btn" class="btn-neon">+ BONE (10)</button>
+                <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; box-shadow:0 0 10px rgba(255,0,255,0.2);">PLAY</button>
             </div>
 
-            <div style="position:absolute; top:20px; right:20px; width:80px; pointer-events:auto; display:flex; flex-direction:column; gap:10px;">
-                <div class="part-item" data-type="Fin" style="background:rgba(0,255,255,0.2); border:1px solid #0ff; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#0ff;">FIN (5)</div>
-                <div class="part-item" data-type="Spike" style="background:rgba(255,0,0,0.2); border:1px solid #f00; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#f00;">SPIKE (5)</div>
-                <div class="part-item" data-type="Eye" style="background:rgba(255,255,255,0.2); border:1px solid #fff; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#fff;">EYE (5)</div>
+            <div class="editor-sidebar right">
+                <div class="part-item" data-type="Fin">FIN (5)</div>
+                <div class="part-item" data-type="Spike">SPIKE (5)</div>
+                <div class="part-item" data-type="Eye">EYE (5)</div>
             </div>
 
-            <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:Orbitron; font-size:20px; text-shadow:0 0 5px #0ff;">
-                WORKBENCH <span id="editor-dna" style="font-size:0.8em; color:#fff;">DNA: 0</span>
+            <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:'Orbitron'; font-size:1.5rem; text-shadow:0 0 10px #0ff;">
+                WORKBENCH <div id="editor-dna" style="font-size:0.8em; color:#fff; margin-top:5px;">DNA: 0</div>
+            </div>
+
+            <div class="glass-panel" style="position:absolute; bottom:100px; left:20px; padding:15px; width:200px; display:none;">
+                <div style="color:#fff; font-size:0.8rem;">STATS PREVIEW</div>
+                <!-- Stats logic can be added here -->
             </div>
         `;
         document.body.appendChild(this.overlay);
