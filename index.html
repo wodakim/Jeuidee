@@ -148,9 +148,62 @@
             transition: opacity 0.3s;
         }
 
+        /* EDITOR UI */
+        #editor-ui {
+            justify-content: flex-start;
+            padding-top: 50px;
+        }
+
+        .editor-panels {
+            display: flex;
+            width: 90%;
+            height: 70%;
+            gap: 20px;
+        }
+
+        .panel {
+            background: rgba(0, 20, 40, 0.8);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .parts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            width: 100%;
+        }
+
+        .part-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            color: #fff;
+            transition: all 0.2s;
+        }
+
+        .part-btn:hover {
+            background: rgba(0, 255, 255, 0.2);
+            border-color: #00ffff;
+        }
+
+        .part-icon {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
         .hidden {
             opacity: 0;
             pointer-events: none;
+            display: none !important; /* Force hide layout */
         }
 
         h1 {
@@ -283,27 +336,59 @@
             </div>
         </div>
 
-        <!-- Evolution Menu (Hidden initially) -->
-        <div id="evo-menu" class="menu-overlay interactive hidden">
-            <h1>Evolve!</h1>
-            <h2>Choose an Upgrade</h2>
-            <div class="evo-container">
-                <div class="evo-card" onclick="evolve('speed')">
-                    <div class="evo-icon" style="border-color: #00ffff; color: #00ffff;">⚡</div>
-                    <h3>Fins</h3>
-                    <p>+ Speed</p>
+        <!-- Evolution Editor (New) -->
+        <div id="editor-ui" class="menu-overlay interactive hidden">
+            <h1 style="font-size: 1.5rem; margin-bottom: 10px;">🧬 ORGANISM EDITOR 🧬</h1>
+
+            <div class="editor-panels">
+                <!-- Left: Stats & Color -->
+                <div class="panel" style="flex: 0.5;">
+                    <h3>Mutation</h3>
+                    <button class="part-btn" onclick="evolve('color')" style="width: 100%; margin-bottom: 10px;">
+                        <div class="part-icon">🎨</div>
+                        Change Color
+                    </button>
+                    <button class="part-btn" onclick="evolve('size')" style="width: 100%;">
+                        <div class="part-icon">💪</div>
+                        Grow Mass
+                    </button>
                 </div>
-                <div class="evo-card" onclick="evolve('attack')">
-                    <div class="evo-icon" style="border-color: #ff0055; color: #ff0055;">⚔️</div>
-                    <h3>Spikes</h3>
-                    <p>+ Damage</p>
-                </div>
-                <div class="evo-card" onclick="evolve('color')">
-                    <div class="evo-icon" style="border-color: #ff00ff; color: #ff00ff;">🎨</div>
-                    <h3>Color</h3>
-                    <p>Random Mutation</p>
+
+                <!-- Center: Preview (Canvas Underneath) -->
+                <!-- We let the canvas show through in the middle gap? No, overlay covers it.
+                     For Phase 3, we just use buttons that auto-place.
+                     The "Drag & Drop" is simulated by simple button clicks for now to ensure mobile stability first.
+                -->
+
+                <!-- Right: Parts -->
+                <div class="panel">
+                    <h3>Add Parts</h3>
+                    <div class="parts-grid">
+                        <button class="part-btn" onclick="evolve('speed')">
+                            <div class="part-icon">⚡</div>
+                            <div>Fins</div>
+                            <small>+Speed</small>
+                        </button>
+                        <button class="part-btn" onclick="evolve('attack')">
+                            <div class="part-icon">⚔️</div>
+                            <div>Spikes</div>
+                            <small>+Damage</small>
+                        </button>
+                        <button class="part-btn" onclick="evolve('eye')">
+                            <div class="part-icon">👁️</div>
+                            <div>Eye</div>
+                            <small>+Sight</small>
+                        </button>
+                        <button class="part-btn" onclick="evolve('tail')">
+                            <div class="part-icon">〰️</div>
+                            <div>Tail</div>
+                            <small>+Turn</small>
+                        </button>
+                    </div>
                 </div>
             </div>
+
+            <button onclick="closeEditor()" style="margin-top: 20px; background: #00ff88; color: #000;">RESUME LIFE</button>
         </div>
 
     </div>
@@ -339,7 +424,7 @@
                 dna: 0,
                 maxDna: 100,
                 upgrades: { fins: 0, spikes: 0 },
-                body: null // SoftBody instance
+                creature: null // CreatureBody instance
             },
 
             // Camera
@@ -440,7 +525,247 @@
 
         const particles = new ParticleSystem();
 
-        // --- SOFT BODY ENGINE ---
+        // --- PARALLAX ATMOSPHERE ---
+        class ParallaxLayer {
+            constructor(scrollFactor, count, range, type) {
+                this.scrollFactor = scrollFactor;
+                this.items = [];
+                this.type = type; // 'deep' or 'mid'
+
+                for(let i=0; i<count; i++) {
+                    this.items.push({
+                        x: MathUtils.randomRange(-range, range),
+                        y: MathUtils.randomRange(-range, range),
+                        size: type === 'deep' ? MathUtils.randomRange(200, 600) : MathUtils.randomRange(2, 10),
+                        alpha: type === 'deep' ? MathUtils.randomRange(0.05, 0.15) : MathUtils.randomRange(0.1, 0.4)
+                    });
+                }
+            }
+
+            draw(ctx, cameraX, cameraY, zoom) {
+                ctx.save();
+                // Apply Parallax translation
+                const px = -cameraX * this.scrollFactor;
+                const py = -cameraY * this.scrollFactor;
+
+                ctx.translate(px, py);
+                // Scale around center... strictly simpler to just draw?
+                // The parallax items are "in world space" but move slower.
+
+                // Correction: We are inside a camera transform already?
+                // No, we usually draw parallax BEFORE camera transform or handle it manually.
+                // Let's render parallax manually in screen space or modified world space.
+                // Easiest: Draw relative to camera center.
+
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+
+                this.items.forEach(p => {
+                    // Wrap around screen? No, infinite feel needs tiling or huge range.
+                    // For now, simple huge range is enough for 4000 world.
+
+                    // Effective position
+                    let dx = p.x - cameraX * this.scrollFactor;
+                    let dy = p.y - cameraY * this.scrollFactor;
+
+                    // Draw relative to center (zoom affects spacing)
+                    // If we want depth, zoom should affect scale less for distant objects?
+                    // Standard 2D parallax: position is scaled by scrollFactor.
+
+                    // Simple approach: Draw in World Space but shift position.
+                    // Wait, render() applies camera transform.
+                    // We need to inverse that or draw before it.
+                    // Let's draw `bgDeep` and `bgMid` inside render(), but adjust coordinates.
+                });
+                ctx.restore();
+            }
+        }
+
+        // We'll implement the drawing logic directly in render() for simplicity with the camera transform.
+        const bgDeepItems = [];
+        const bgMidItems = [];
+
+        function initBackground() {
+            // Deep shapes
+            for(let i=0; i<20; i++) {
+                bgDeepItems.push({
+                    x: MathUtils.randomRange(-1000, WORLD_SIZE + 1000),
+                    y: MathUtils.randomRange(-1000, WORLD_SIZE + 1000),
+                    r: MathUtils.randomRange(300, 800)
+                });
+            }
+            // Mid bubbles
+            for(let i=0; i<100; i++) {
+                bgMidItems.push({
+                    x: MathUtils.randomRange(-500, WORLD_SIZE + 500),
+                    y: MathUtils.randomRange(-500, WORLD_SIZE + 500),
+                    r: MathUtils.randomRange(2, 8)
+                });
+            }
+        }
+        initBackground();
+
+        // --- CREATURE ENGINE (Vertebrae + Skin + Parts) ---
+        class Vertebra {
+            constructor(x, y, radius) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                // Relative position to Creature center (0,0 is head usually)
+                this.relX = x;
+                this.relY = y;
+            }
+        }
+
+        class BodyPart {
+            constructor(type, vertebraIndex, angleOffset, distOffset, mirrored = false) {
+                this.type = type; // 'spike', 'fin'
+                this.vertebraIndex = vertebraIndex;
+                this.angleOffset = angleOffset;
+                this.distOffset = distOffset;
+                this.mirrored = mirrored;
+
+                // Animation state
+                this.wobble = Math.random() * 10;
+            }
+
+            draw(ctx, creatureX, creatureY, spine, dt, color) {
+                this.wobble += dt * 5;
+
+                // Find parent vertebra
+                const v = spine[this.vertebraIndex] || spine[0];
+
+                // Calculate position relative to creature center
+                // Basic rotation logic: parts rotate with velocity?
+                // For now, fixed orientation relative to creature.
+                // NOTE: A real rig needs rotation of vertebrae. Here we assume 0 rotation for simplicity
+                // or align with velocity if passed.
+
+                // Let's assume creature faces 'angle'.
+                const angle = 0; // Placeholder for creature rotation
+
+                const drawPart = (mirror) => {
+                    const side = mirror ? -1 : 1;
+                    const theta = angle + this.angleOffset * side;
+
+                    const px = creatureX + v.relX + Math.cos(theta) * (v.radius + this.distOffset);
+                    const py = creatureY + v.relY + Math.sin(theta) * (v.radius + this.distOffset);
+
+                    ctx.save();
+                    ctx.translate(px, py);
+                    ctx.rotate(theta + (this.type === 'fin' ? Math.sin(this.wobble)*0.2 : 0));
+
+                    ctx.fillStyle = color;
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 15;
+
+                    if (this.type === 'spike') {
+                        ctx.beginPath();
+                        ctx.moveTo(0, -5);
+                        ctx.lineTo(20, 0);
+                        ctx.lineTo(0, 5);
+                        ctx.fill();
+                    } else if (this.type === 'fin') {
+                        ctx.beginPath();
+                        ctx.moveTo(0, 0);
+                        ctx.quadraticCurveTo(15, -10, 30, 0);
+                        ctx.quadraticCurveTo(15, 10, 0, 0);
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                };
+
+                drawPart(false);
+                if (this.mirrored) drawPart(true);
+            }
+        }
+
+        class CreatureBody {
+            constructor(spineConfig) {
+                // spineConfig: array of {x, y, radius} relative
+                this.spine = [];
+                this.parts = []; // Array of BodyPart
+                this.softBody = null;
+
+                // Init Spine
+                if (spineConfig && spineConfig.length > 0) {
+                    spineConfig.forEach(v => this.spine.push(new Vertebra(v.x, v.y, v.radius)));
+                } else {
+                    // Default Single Node
+                    this.spine.push(new Vertebra(0, 0, CELL_BASE_RADIUS));
+                }
+
+                // Init Skin
+                this.rebuildSkin();
+            }
+
+            addPart(type) {
+                // Auto-place on random available spot for now
+                // "Evolution" logic
+                const vIndex = 0; // Head
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 5;
+                const mirror = true;
+
+                this.parts.push(new BodyPart(type, vIndex, angle, dist, mirror));
+            }
+
+            rebuildSkin() {
+                // Generate a hull polygon around all vertebrae
+                // For now, simple implementation: A SoftBody around the "Average Center"
+                // with radius covering the furthest vertebra.
+                // NOTE: Full metaball skinning is complex for a "Single File" constrained update without WebGL shaders.
+                // We will approximate by creating a SoftBody that encompasses the bounding box of the spine.
+
+                // 1. Calculate Bounds
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                this.spine.forEach(v => {
+                    minX = Math.min(minX, v.relX - v.radius);
+                    maxX = Math.max(maxX, v.relX + v.radius);
+                    minY = Math.min(minY, v.relY - v.radius);
+                    maxY = Math.max(maxY, v.relY + v.radius);
+                });
+
+                const width = maxX - minX;
+                const height = maxY - minY;
+                const radius = Math.max(width, height) / 2;
+
+                // Create/Reuse SoftBody
+                // Note: This effectively keeps the circular blob look for now but prepares the data structure.
+                // To support "Long" creatures, we would need multiple overlapping SoftBodies or a custom mesh.
+                // Let's stick to the single SoftBody for Phase 2 compatibility but position it correctly.
+
+                this.softBody = new SoftBody(radius, 16, 5, 0.5);
+            }
+
+            addVertebra(radius) {
+                // Add new segment behind the last one
+                const last = this.spine[this.spine.length - 1];
+                this.spine.push(new Vertebra(last.relX - radius * 1.5, last.relY, radius)); // Offset X
+                this.rebuildSkin();
+            }
+
+            update(dt, vx, vy, mass) {
+                if(this.softBody) this.softBody.update(dt, vx, vy, mass);
+            }
+
+            draw(ctx, x, y, color) {
+                // Draw Skin
+                if(this.softBody) this.softBody.draw(ctx, x, y, color);
+
+                // Draw Parts
+                // We need rotation info... passed or stored?
+                // Currently SoftBody doesn't store rotation.
+                // Let's pass 0 for now, or update BodyPart to handle rotation.
+                const dt = 0.016; // Hack: need real dt passed to draw? Or update?
+                // Let's rely on draw loop dt? No, simple animation.
+
+                this.parts.forEach(p => p.draw(ctx, x, y, this.spine, dt, color));
+            }
+        }
+
+        // --- SOFT BODY ENGINE (Legacy/Base) ---
+        // Kept for Enemies and underlying logic
         class SoftBody {
             constructor(radius, segments = 12, stiffness = 5, damping = 0.5) {
                 this.radius = radius;
@@ -661,19 +986,28 @@
             state.player.x = MathUtils.clamp(state.player.x, 0, WORLD_SIZE);
             state.player.y = MathUtils.clamp(state.player.y, 0, WORLD_SIZE);
 
-            // Soft Body Update
-            // Resize if mass changed
+            // Creature Update
+            // Resize logic moved to CreatureBody... or handled by re-init?
+            // For now, let's just sync radius
             const scaleFactor = Math.sqrt(state.player.mass / 10);
-            const targetRadius = CELL_BASE_RADIUS * scaleFactor;
 
-            // Re-init body if significantly different (or init for first time)
-            if (!state.player.body || Math.abs(state.player.body.baseRadius - targetRadius) > 1) {
-                // Keep old wobble if exists to prevent snap? Nah, simple reset is cleaner for now
-                // Actually, let's just scale points? No, re-gen is safer.
-                state.player.body = new SoftBody(targetRadius, 16, 8, 0.8);
+            if (!state.player.creature) {
+                state.player.creature = new CreatureBody([{x:0, y:0, radius: CELL_BASE_RADIUS}]);
             }
-            state.player.radius = targetRadius;
-            state.player.body.update(dt, state.player.vx, state.player.vy, state.player.mass);
+
+            // Check if mass changed significantly to resize visuals?
+            // Simplified: Rebuild skin if scale changed
+            // Actually, CreatureBody should handle scaling.
+            // For this skeleton, we hack: Reset creature skin radius based on mass.
+            const currentRad = state.player.creature.softBody.baseRadius;
+            const targetRad = CELL_BASE_RADIUS * scaleFactor;
+
+            if (Math.abs(currentRad - targetRad) > 1) {
+                 state.player.creature.softBody = new SoftBody(targetRad, 16, 8, 0.8);
+                 state.player.radius = targetRad;
+            }
+
+            state.player.creature.update(dt, state.player.vx, state.player.vy, state.player.mass);
 
             // 2. Camera Follow
             // Target Position: Center on player
@@ -756,9 +1090,7 @@
 
             // Check Evolution
             if (state.player.dna >= state.player.maxDna) {
-                // Trigger Evolution Menu
-                document.getElementById('evo-menu').classList.remove('hidden');
-                state.running = false; // Pause
+                openEditor();
             }
         }
 
@@ -767,26 +1099,43 @@
             ctx.fillStyle = '#000510';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+            // --- ATMOSPHERE (Parallax) ---
+            // Draw Deep Layer (ScrollFactor 0.1)
+            ctx.save();
+            ctx.translate(canvas.width/2, canvas.height/2);
+            ctx.scale(state.camera.zoom, state.camera.zoom); // Zoom affects background less? Or full?
+            // Usually bg scales less, but for Spore feel, stick to consistent scale for now, just scroll slower.
+            ctx.translate(-state.camera.x * 0.1, -state.camera.y * 0.1);
+
+            ctx.fillStyle = '#000a1a'; // Slightly lighter than black
+            bgDeepItems.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.restore();
+
+            // Draw Mid Layer (ScrollFactor 0.5)
+            ctx.save();
+            ctx.translate(canvas.width/2, canvas.height/2);
+            ctx.scale(state.camera.zoom, state.camera.zoom);
+            ctx.translate(-state.camera.x * 0.5, -state.camera.y * 0.5);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            bgMidItems.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.restore();
+
+
+            // --- WORLD ENTITIES ---
             ctx.save();
 
-            // Apply Camera Transform
-            // Translate to center, scale, translate back
+            // Apply Main Camera Transform
             ctx.scale(state.camera.zoom, state.camera.zoom);
             ctx.translate(-state.camera.x, -state.camera.y);
-
-            // Draw World Grid (Reference)
-            ctx.strokeStyle = '#112233';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            for (let x = 0; x <= WORLD_SIZE; x += 200) {
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, WORLD_SIZE);
-            }
-            for (let y = 0; y <= WORLD_SIZE; y += 200) {
-                ctx.moveTo(0, y);
-                ctx.lineTo(WORLD_SIZE, y);
-            }
-            ctx.stroke();
 
             // Draw Food
             state.foods.forEach(f => {
@@ -807,10 +1156,9 @@
             // Draw Particles (Under player?)
             particles.draw(ctx);
 
-            // Draw Player (Soft Body)
-            if (state.player.body) {
-                // Remove redundant shadow setting here, moved to SoftBody.draw
-                state.player.body.draw(ctx, state.player.x, state.player.y, state.player.color);
+            // Draw Player (Creature)
+            if (state.player.creature) {
+                state.player.creature.draw(ctx, state.player.x, state.player.y, state.player.color);
             }
 
             // Draw Eyes (Direction)
@@ -1055,19 +1403,47 @@
              requestAnimationFrame(gameLoop);
         };
 
-        window.evolve = (type) => {
-            if (type === 'speed') state.player.speed += 50;
-            if (type === 'size') state.player.mass += 20;
-            if (type === 'color') state.player.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+        // --- EDITOR LOGIC ---
+        function openEditor() {
+            document.getElementById('editor-ui').classList.remove('hidden');
+            state.running = false;
+        }
 
-            state.player.dna = 0;
-            state.player.maxDna = Math.floor(state.player.maxDna * 1.5);
-            updateUI();
-
-            document.getElementById('evo-menu').classList.add('hidden');
+        window.closeEditor = () => {
+            document.getElementById('editor-ui').classList.add('hidden');
             state.running = true;
             state.lastTime = performance.now();
             requestAnimationFrame(gameLoop);
+        };
+
+        window.evolve = (type) => {
+            // Apply Mutation
+            if (type === 'speed') {
+                state.player.speed += 50;
+                if (state.player.creature) state.player.creature.addPart('fin');
+            }
+            if (type === 'attack') {
+                if (state.player.creature) state.player.creature.addPart('spike');
+            }
+            if (type === 'size') state.player.mass += 20;
+            if (type === 'color') state.player.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+
+            // Cost? For now, Evolution allows 1 choice per "Level Up".
+            // Reset Progress
+            state.player.dna = 0;
+            state.player.maxDna = Math.floor(state.player.maxDna * 1.5);
+
+            updateUI();
+
+            // Save immediately
+            // But DON'T close editor automatically anymore?
+            // Allow multiple tweaks?
+            // Requirements: "Trigger when DNA is full... pause game".
+            // Spore style: You enter editor, spend points, then leave.
+            // Current Logic: DNA = 1 Mutation Credit.
+            // So we choose ONE thing then leave.
+
+            closeEditor();
         };
 
         // Init Input
