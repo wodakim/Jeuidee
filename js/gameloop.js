@@ -6,6 +6,7 @@ import Enemy from './enemy.js';
 import AudioSystem from './audio.js';
 import Stats from './stats.js';
 import Renderer from './renderer.js';
+import SaveManager from './save_manager.js';
 
 class GameLoop {
     constructor() {
@@ -31,15 +32,20 @@ class GameLoop {
             constraints: [],
             parts: [],
             stats: new Stats(),
-            gameStats: { dna: 0, mass: 10, health: 100, maxHealth: 100 }
+            gameStats: { dna: 0, mass: 10, health: 100, maxHealth: 100 },
+            color: '#00ffff'
         };
 
+        this.saveManager = new SaveManager(this);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
         // Ecosystem
-        this.bgDeep = [];
-        this.bgMid = [];
+        this.bgAbyssal = []; // Layer 0: Giants
+        this.bgDeep = [];    // Layer 1: Distant particles
+        this.bgMid = [];     // Layer 2: Midground
+        this.bgFore = [];    // Layer 3: Foreground dust
+
         this.enemies = [];
         this.food = [];
         this.particles = [];
@@ -52,14 +58,24 @@ class GameLoop {
     }
 
     createUI() {
+        // AD SPACE
+        const adSpace = document.createElement('div');
+        adSpace.id = 'ad-space';
+        // Style is handled in CSS mostly, but specific inline for functionality
+        adSpace.style = `position:absolute; bottom:0; left:0; width:100%; height:50px; background:rgba(0,0,0,0.8); display:flex; justify-content:center; align-items:center; z-index:1000; color:#444; font-family:Orbitron; pointer-events:none; border-top:1px solid #333;`;
+        adSpace.innerText = 'AD SPACE';
+        document.body.appendChild(adSpace);
+
         // Main Menu
         const menu = document.createElement('div');
         menu.id = 'main-menu';
-        menu.style = `position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,16,0.9); display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:100; pointer-events:auto; font-family:Orbitron; color:#0ff;`;
+        // Using classes from style.css?
+        // Let's replace inline styles with proper structure, but for simplicity in JS creation, some inline is retained or we rely on ID selectors in CSS.
+        // Actually, style.css targets #main-menu, so we can clean this up.
         menu.innerHTML = `
-            <h1 style="font-size:3em; text-shadow:0 0 20px #0ff;">NEON ABYSS</h1>
+            <h1>NEON ABYSS</h1>
             <div style="margin-top:20px;">
-                <button id="play-btn" style="padding:15px 40px; background:linear-gradient(45deg, #0ff, #00f); border:none; border-radius:30px; font-size:1.5em; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 15px #0ff;">EVOLVE</button>
+                <button id="play-btn" class="btn-neon">EVOLVE</button>
             </div>
             <p style="margin-top:20px; font-size:0.8em; opacity:0.7;">Touch & Drag to Move</p>
         `;
@@ -68,11 +84,11 @@ class GameLoop {
         // Game Over Screen
         const gameOver = document.createElement('div');
         gameOver.id = 'game-over';
-        gameOver.style = `position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(20,0,0,0.9); display:none; flex-direction:column; justify-content:center; align-items:center; z-index:100; pointer-events:auto; font-family:Orbitron; color:#f00;`;
+        gameOver.style.display = 'none'; // Initial state
         gameOver.innerHTML = `
-            <h1 style="font-size:3em; text-shadow:0 0 20px #f00;">EXTINCT</h1>
+            <h1 style="color:var(--danger); text-shadow:0 0 20px var(--danger);">EXTINCT</h1>
             <div style="margin-top:20px;">
-                <button id="respawn-btn" style="padding:15px 40px; background:linear-gradient(45deg, #f00, #500); border:none; border-radius:30px; font-size:1.5em; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 15px #f00;">REBIRTH</button>
+                <button id="respawn-btn" class="btn-neon btn-danger">REBIRTH</button>
             </div>
         `;
         document.body.appendChild(gameOver);
@@ -82,7 +98,7 @@ class GameLoop {
         hud.id = 'game-hud';
         hud.style = `position:absolute; top:20px; right:20px; z-index:90; pointer-events:auto;`;
         hud.innerHTML = `
-            <button id="evolve-btn" style="display:none; padding:10px 20px; background:linear-gradient(45deg, #f0f, #00f); border:none; border-radius:20px; font-family:Orbitron; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 10px #f0f;">EVOLVE (10 DNA)</button>
+            <button id="evolve-btn" style="display:none;">EVOLVE (10 DNA)</button>
         `;
         document.body.appendChild(hud);
 
@@ -93,21 +109,31 @@ class GameLoop {
             document.getElementById('evolve-btn').style.display = 'none';
         };
     }
+    // ... (rest of the file is identical)
 
     init() {
         this.resize();
         window.addEventListener('resize', () => this.resize());
         this.resetCreature();
+
+        // Try Load
+        this.saveManager.load();
+
         this.initBackground();
         this.spawnEnemies();
         this.spawnFood(50);
         this.start();
+
+        // Auto-Save Interval (30s)
+        setInterval(() => {
+            if (this.gameState === 'playing') this.saveManager.save();
+        }, 30000);
     }
 
     resetCreature() {
         this.creature.points = [];
         this.creature.constraints = [];
-        this.creature.gameStats = { dna: 0, mass: 10, health: 100, maxHealth: 100 };
+        this.creature.gameStats = this.creature.gameStats || { dna: 0, mass: 10, health: 100, maxHealth: 100 };
         this.headAngle = 0;
 
         const spineLength = 12;
@@ -138,6 +164,10 @@ class GameLoop {
 
     respawn() {
         document.getElementById('game-over').style.display = 'none';
+        this.creature.gameStats.health = this.creature.gameStats.maxHealth;
+        this.creature.gameStats.mass = Math.max(10, this.creature.gameStats.mass * 0.5); // Penalty
+        this.saveManager.save();
+
         this.resetCreature();
         this.camera.x = 0;
         this.camera.y = 0;
@@ -156,25 +186,80 @@ class GameLoop {
         }
     }
 
-    spawnEnemies() {
-        this.enemies = []; // Reset
-        for(let i=0; i<5; i++) {
-            this.enemies.push(new Enemy((Math.random()-0.5)*1000, (Math.random()-0.5)*1000, 'grazer', this.physics));
+    spawnMeat(x, y, count) {
+        for(let i=0; i<count; i++) {
+            this.food.push({
+                x: x + (Math.random()-0.5)*50,
+                y: y + (Math.random()-0.5)*50,
+                radius: 8,
+                color: '#ff4444',
+                type: 'meat',
+                dnaValue: 5
+            });
         }
-        this.enemies.push(new Enemy((Math.random()-0.5)*1000, (Math.random()-0.5)*1000, 'hunter', this.physics));
+    }
+
+    spawnEnemies() {
+        const targetCount = 6;
+        if (this.enemies.length >= targetCount) return;
+
+        const count = targetCount - this.enemies.length;
+        const playerScale = Math.sqrt(this.creature.gameStats.mass / 10);
+        const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
+        const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
+
+        for(let i=0; i<count; i++) {
+            // Difficulty based on player scale
+            const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
+
+            // Spawn distance
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 1000 + Math.random() * 1000;
+            const ex = playerX + Math.cos(angle) * dist;
+            const ey = playerY + Math.sin(angle) * dist;
+
+            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics));
+        }
     }
 
     initBackground() {
+        this.bgAbyssal = [];
         this.bgDeep = [];
         this.bgMid = [];
-        for(let i=0; i<50; i++) {
+        this.bgFore = [];
+
+        // 1. Abyssal Giants (Procedural Shapes)
+        for(let i=0; i<5; i++) {
+             // Create a chain of large circles to simulate a distant leviathan
+             const giant = {
+                 x: (Math.random() - 0.5) * 8000,
+                 y: (Math.random() - 0.5) * 8000,
+                 vx: (Math.random() - 0.5) * 2, // Slow
+                 vy: (Math.random() - 0.5) * 2,
+                 segments: []
+             };
+             const len = 10 + Math.random() * 10;
+             for(let j=0; j<len; j++) {
+                 giant.segments.push({
+                     ox: j * 50, // Offset
+                     oy: Math.sin(j * 0.5) * 50,
+                     r: 100 + Math.random() * 100
+                 });
+             }
+             this.bgAbyssal.push(giant);
+        }
+
+        // 2. Deep Layer (Small dots)
+        for(let i=0; i<100; i++) {
             this.bgDeep.push({
-                x: (Math.random() - 0.5) * 5000,
-                y: (Math.random() - 0.5) * 5000,
-                r: Math.random() * 100 + 50,
-                alpha: Math.random() * 0.05
+                x: (Math.random() - 0.5) * 6000,
+                y: (Math.random() - 0.5) * 6000,
+                r: Math.random() * 4 + 2,
+                alpha: Math.random() * 0.2
             });
         }
+
+        // 3. Mid Layer (Existing)
         for(let i=0; i<200; i++) {
             this.bgMid.push({
                 x: (Math.random() - 0.5) * 4000,
@@ -185,11 +270,28 @@ class GameLoop {
                 alpha: Math.random() * 0.3
             });
         }
+
+        // 4. Foreground (Dust/Snow - Fast)
+        for(let i=0; i<50; i++) {
+            this.bgFore.push({
+                x: (Math.random() - 0.5) * 3000,
+                y: (Math.random() - 0.5) * 3000,
+                r: Math.random() * 2,
+                vx: (Math.random() - 0.5) * 20,
+                vy: (Math.random() - 0.5) * 20,
+                alpha: Math.random() * 0.5 + 0.2
+            });
+        }
     }
 
     resize() {
         this.width = window.innerWidth;
         this.height = window.innerHeight;
+
+        // Adjust for Ad Space (50px bottom)
+        const adHeight = 50;
+        this.height -= adHeight;
+
         this.canvas.width = this.width;
         this.canvas.height = this.height;
         this.camera.resize(this.width, this.height);
@@ -220,7 +322,6 @@ class GameLoop {
         if (this.gameState === 'playing') {
             this.update(dt);
         } else if (this.gameState === 'menu') {
-            // Background Animation?
             this.updateBackgroundOnly(dt);
         }
 
@@ -229,10 +330,18 @@ class GameLoop {
     }
 
     updateBackgroundOnly(dt) {
-        // Just drift logic
+        // Drift all layers
+        this.bgAbyssal.forEach(g => {
+            g.x += g.vx * dt;
+            g.y += g.vy * dt;
+        });
         this.bgMid.forEach(p => {
             p.x += p.vx * dt;
             p.y += p.vy * dt;
+        });
+        this.bgFore.forEach(p => {
+             p.x += p.vx * dt;
+             p.y += p.vy * dt;
         });
     }
 
@@ -263,13 +372,11 @@ class GameLoop {
         const head = this.creature.points[0];
         const inputVec = this.input.getVector();
 
-        // TUNING: Improved Speed & Turn
-        // Increased Base Speed (Snappier)
+        // TUNING
         const swimForce = (this.creature.stats.speed + 1000) * scale;
-        const turnSpeed = this.creature.stats.turnSpeed * 2.0; // Faster turning
+        const turnSpeed = this.creature.stats.turnSpeed * 2.0;
 
         if (this.input.active) {
-            // Apply Force
             head.x += inputVec.x * swimForce * dt * dt;
             head.y += inputVec.y * swimForce * dt * dt;
 
@@ -282,28 +389,51 @@ class GameLoop {
 
         this.physics.update(this.creature.points, this.creature.constraints, dt);
 
-        // Enemies
+        // Background Updates
+        this.updateBackgroundOnly(dt);
+
+        // Respawn Enemies if needed
+        this.spawnEnemies();
+
+        // Enemies Update
+        const playerRadius = head.radius; // Roughly
+
         for (let i = this.enemies.length - 1; i >= 0; i--) {
             const e = this.enemies[i];
-            e.update(dt, head);
+            e.update(dt, head, playerRadius);
 
+            // Check Collision
             const collision = Physics.checkSoftBodyCollision(this.creature.points, e.points);
 
             if (collision) {
-                const enemyDmg = 5;
+                const enemyDmg = e.stats.damage;
                 this.creature.gameStats.health -= Math.max(0, enemyDmg - this.creature.stats.defense);
+
+                // Deal Damage to Enemy
+                e.health -= Math.max(0, this.creature.stats.damage);
 
                 const mx = (head.x + e.points[0].x) / 2;
                 const my = (head.y + e.points[0].y) / 2;
 
                 this.hitstop = 0.05;
-                this.spawnParticles(mx, my, '#ff0044', 8, 300);
-                this.spawnParticles(mx, my, '#ffffff', 2, 500);
+                this.spawnParticles(mx, my, '#ff0044', 5, 200);
+
+                // Enemy Death
+                if (e.health <= 0) {
+                     this.spawnParticles(mx, my, '#ffaa00', 20, 400); // Death explosion
+                     this.spawnMeat(mx, my, 3 + Math.floor(e.scale)); // Drop meat
+                     this.enemies.splice(i, 1);
+                     continue;
+                }
 
                 this.camera.x += (Math.random()-0.5) * 10;
                 this.camera.y += (Math.random()-0.5) * 10;
                 this.audio.playTone(100, 'sawtooth', 0.1);
             }
+
+            // Despawn far away enemies
+            const dist = Math.hypot(head.x - e.points[0].x, head.y - e.points[0].y);
+            if (dist > 3000) this.enemies.splice(i, 1);
         }
 
         for (let i = this.food.length - 1; i >= 0; i--) {
@@ -311,17 +441,24 @@ class GameLoop {
             const dist = Math.hypot(head.x - f.x, head.y - f.y);
             if (dist < head.radius + f.radius) {
                 this.food.splice(i, 1);
-                this.creature.gameStats.dna += 1;
-                this.creature.gameStats.mass += 0.5;
-                this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5); // Heal on eat
+
+                const dnaValue = f.dnaValue || 1;
+                this.creature.gameStats.dna += dnaValue;
+                this.creature.gameStats.mass += 0.5 * dnaValue; // Meat gives more mass
+                this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
+
                 this.audio.playEat();
-                this.spawnParticles(f.x, f.y, '#00ff00', 5, 100);
-                this.food.push({
-                    x: head.x + (Math.random()-0.5)*1000,
-                    y: head.y + (Math.random()-0.5)*1000,
-                    radius: 5,
-                    color: '#0f0'
-                });
+                this.spawnParticles(f.x, f.y, f.color, 5, 100);
+
+                if (f.type !== 'meat') {
+                    // Respawn Plant
+                     this.food.push({
+                        x: head.x + (Math.random()-0.5)*1000,
+                        y: head.y + (Math.random()-0.5)*1000,
+                        radius: 5,
+                        color: '#0f0'
+                    });
+                }
             }
         }
 
@@ -334,11 +471,6 @@ class GameLoop {
         }
 
         this.camera.update(head.x, head.y, head.vx, head.vy, dt);
-
-        this.bgMid.forEach(p => {
-            p.x += p.vx * dt;
-            p.y += p.vy * dt;
-        });
 
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
@@ -371,6 +503,24 @@ class GameLoop {
         this.ctx.fillStyle = bgGrad;
         this.ctx.fillRect(0, 0, this.width, this.height);
 
+        // --- LAYER 0: ABYSSAL GIANTS (Parallax 0.05) ---
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
+        this.ctx.fillStyle = '#000810'; // Very dark silhouette
+        this.ctx.filter = 'blur(10px)'; // Blur effect for depth
+        this.bgAbyssal.forEach(g => {
+            this.ctx.beginPath();
+            g.segments.forEach(s => {
+                this.ctx.arc(g.x + s.ox, g.y + s.oy, s.r, 0, Math.PI * 2);
+            });
+            this.ctx.fill();
+        });
+        this.ctx.filter = 'none';
+        this.ctx.restore();
+
+        // --- LAYER 1: DEEP PARTICLES (Parallax 0.1) ---
         this.ctx.save();
         this.ctx.translate(this.width/2, this.height/2);
         this.ctx.scale(this.camera.zoom, this.camera.zoom);
@@ -384,6 +534,7 @@ class GameLoop {
         });
         this.ctx.restore();
 
+        // --- LAYER 2: MIDGROUND (Parallax 0.5) ---
         this.ctx.save();
         this.ctx.translate(this.width/2, this.height/2);
         this.ctx.scale(this.camera.zoom, this.camera.zoom);
@@ -397,9 +548,12 @@ class GameLoop {
         });
         this.ctx.restore();
 
+        // --- GAMEPLAY LAYER ---
         this.camera.apply(this.ctx);
         this.ctx.globalAlpha = 1.0;
 
+        // Food
+        this.ctx.globalCompositeOperation = 'lighter'; // Additive blend for glowing food
         this.food.forEach(f => {
             this.ctx.fillStyle = f.color;
             this.ctx.shadowColor = f.color;
@@ -409,6 +563,7 @@ class GameLoop {
             this.ctx.fill();
             this.ctx.shadowBlur = 0;
         });
+        this.ctx.globalCompositeOperation = 'source-over';
 
         this.particles.forEach(p => {
             this.ctx.globalAlpha = p.life * 2;
@@ -436,6 +591,24 @@ class GameLoop {
 
         this.camera.restore(this.ctx);
 
+        // --- LAYER 3: FOREGROUND DUST (Parallax 1.2) ---
+        // Rendered on top of everything without camera transform (or with exaggerated one)
+        // Actually, Foreground should be affected by camera but faster.
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom); // Zoom affects it? Yes
+        this.ctx.translate(-this.camera.x * 1.5, -this.camera.y * 1.5); // Faster parallax
+        this.ctx.fillStyle = '#ffffff';
+        this.bgFore.forEach(p => {
+             this.ctx.globalAlpha = p.alpha;
+             this.ctx.beginPath();
+             this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+             this.ctx.fill();
+        });
+        this.ctx.restore();
+        this.ctx.globalAlpha = 1.0;
+
+        // Joystick
         if (this.input.active && !this.editor.active && this.gameState === 'playing') {
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
             this.ctx.lineWidth = 2;

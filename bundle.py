@@ -9,6 +9,7 @@ def bundle():
         'js/stats.js',
         'js/camera.js',
         'js/renderer.js',
+        'js/save_manager.js',
         'js/input.js',
         'js/enemy.js',
         'js/editor.js',
