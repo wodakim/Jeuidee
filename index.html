@@ -138,7 +138,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 10, 20, 0.85);
+            background: rgba(0, 10, 20, 0.95);
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -148,31 +148,44 @@
             transition: opacity 0.3s;
         }
 
-        /* EDITOR UI */
+        /* EDITOR UI - Transparent Center for Preview */
         #editor-ui {
-            justify-content: flex-start;
-            padding-top: 50px;
-            pointer-events: none; /* Let clicks pass to canvas for drag-drop */
+            background: transparent; /* See-through */
+            justify-content: space-between; /* Panels on sides */
+            padding-top: 0;
+            pointer-events: none;
+            flex-direction: row;
+            align-items: stretch;
         }
 
         .editor-panels {
+            /* Now just container for the panels layout */
             display: flex;
-            width: 90%;
-            height: 70%;
-            gap: 20px;
-            pointer-events: auto; /* Re-enable for UI */
+            width: 100%;
+            height: 100%;
+            justify-content: space-between;
+            pointer-events: none;
         }
 
         .panel {
             background: rgba(0, 20, 40, 0.8);
             border: 1px solid rgba(0, 255, 255, 0.3);
-            border-radius: 12px;
+            border-radius: 0;
             padding: 20px;
-            flex: 1;
+            width: 250px; /* Fixed width sidebars */
             display: flex;
             flex-direction: column;
             align-items: center;
             overflow-y: auto;
+            pointer-events: auto; /* Clickable */
+            backdrop-filter: blur(10px);
+        }
+
+        /* Adjust for mobile landscape */
+        @media (max-width: 800px) {
+            .panel { width: 180px; padding: 10px; }
+            .part-icon { font-size: 20px; }
+            .part-btn { padding: 10px; font-size: 0.8em; }
         }
 
         .parts-grid {
@@ -365,28 +378,29 @@
 
         <!-- Evolution Editor (New) -->
         <div id="editor-ui" class="menu-overlay interactive hidden">
-            <h1 style="font-size: 1.5rem; margin-bottom: 10px; pointer-events: auto;">🧬 ORGANISM EDITOR 🧬</h1>
 
             <div class="editor-panels">
                 <!-- Left: Body & Stats -->
-                <div class="panel" style="flex: 0.5;">
-                    <h3>Body</h3>
+                <div class="panel">
+                    <h3 style="margin-top:0">🧬 EDITOR</h3>
+                    <h4 style="color:#00ffff">Mutation</h4>
+
                     <button class="part-btn" onclick="editorAction('color')" style="width: 100%; margin-bottom: 10px;">
                         <div class="part-icon">🎨</div>
                         Color
                     </button>
                     <button class="part-btn" onclick="editorAction('vertebra')" style="width: 100%;">
                         <div class="part-icon">🦴</div>
-                        Add Vertebra
+                        + Vertebra
                     </button>
-                    <div style="margin-top:20px; text-align:center;">
-                        <p>Drag parts to body</p>
-                    </div>
+
+                    <div style="flex:1"></div>
+                    <button onclick="closeEditor()" style="width:100%; padding:20px; background: #00ff88; color: #000; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">RESUME</button>
                 </div>
 
                 <!-- Right: Parts Inventory -->
                 <div class="panel">
-                    <h3>Parts DNA</h3>
+                    <h3>PARTS DNA</h3>
                     <div class="parts-grid">
                         <div class="part-btn" ontouchstart="startDrag(event, 'fin')" onmousedown="startDrag(event, 'fin')">
                             <div class="part-icon">⚡</div>
@@ -405,12 +419,14 @@
                             <div>Poison</div>
                         </div>
                     </div>
+
+                    <div style="margin-top: auto; width: 100%; text-align: center; opacity: 0.7;">
+                        <p>Drag parts to creature</p>
+                    </div>
                 </div>
             </div>
 
             <div id="trash-zone">TRASH</div>
-
-            <button onclick="closeEditor()" style="margin-top: 20px; background: #00ff88; color: #000; pointer-events: auto;">RESUME LIFE</button>
         </div>
 
     </div>
@@ -613,6 +629,7 @@
         }
 
         // We'll implement the drawing logic directly in render() for simplicity with the camera transform.
+        const bgOminousItems = [];
         const bgDeepItems = [];
         const bgMidItems = [];
 
@@ -669,6 +686,16 @@
         const algaeForests = [];
 
         function initBackground() {
+            // Ominous Giants (Very Deep)
+            for(let i=0; i<5; i++) {
+                bgOminousItems.push({
+                    x: MathUtils.randomRange(-2000, WORLD_SIZE + 2000),
+                    y: MathUtils.randomRange(-2000, WORLD_SIZE + 2000),
+                    r: MathUtils.randomRange(1000, 2500),
+                    color: Math.random() > 0.5 ? '#330000' : '#001100' // Dark Red or Green
+                });
+            }
+
             // Deep shapes
             for(let i=0; i<20; i++) {
                 bgDeepItems.push({
@@ -853,7 +880,7 @@
             }
 
             draw(ctx, x, y, color, isEditor = false) {
-                // 1. Draw Skin (Metaballs Algorithm)
+                // 1. Draw Skin (Interpolation Algorithm)
                 ctx.save();
                 ctx.globalCompositeOperation = 'lighter';
                 ctx.shadowColor = color;
@@ -862,59 +889,32 @@
 
                 ctx.beginPath();
 
-                // Draw connections between vertebrae
-                // For each pair, draw a smooth skin hull
                 if (this.spine.length === 1) {
                     ctx.arc(x + this.spine[0].relX, y + this.spine[0].relY, this.spine[0].radius, 0, Math.PI*2);
                 } else {
-                    // Complex hull drawing
-                    // We need to find tangent lines between circles
-                    // For simplicity in Canvas, we can just draw circles and thick lines?
-                    // Better: Draw circles and fill rects between them, smoothed by lineJoin='round'
+                    // Interpolate circles between vertebrae to fill gaps smoothly
+                    // This creates a perfect tube/worm look without complex hull math artifacts
 
-                    ctx.lineJoin = 'round';
-                    ctx.lineCap = 'round';
+                    for (let i = 0; i < this.spine.length - 1; i++) {
+                        const curr = this.spine[i];
+                        const next = this.spine[i+1];
 
-                    for (let i = 0; i < this.spine.length; i++) {
-                        const v = this.spine[i];
-                        const px = x + v.relX;
-                        const py = y + v.relY;
+                        const p1x = x + curr.relX;
+                        const p1y = y + curr.relY;
+                        const p2x = x + next.relX;
+                        const p2y = y + next.relY;
 
-                        // Draw circle
-                        ctx.moveTo(px + v.radius, py);
-                        ctx.arc(px, py, v.radius, 0, Math.PI*2);
+                        const dist = MathUtils.dist(p1x, p1y, p2x, p2y);
+                        const steps = Math.ceil(dist / 5); // 1 circle every 5px
 
-                        // Draw connection to next
-                        if (i < this.spine.length - 1) {
-                            const next = this.spine[i+1];
-                            const nx = x + next.relX;
-                            const ny = y + next.relY;
+                        for(let s=0; s<=steps; s++) {
+                            const t = s / steps;
+                            const cx = MathUtils.lerp(p1x, p2x, t);
+                            const cy = MathUtils.lerp(p1y, p2y, t);
+                            const cr = MathUtils.lerp(curr.radius, next.radius, t);
 
-                            // Thick line connecting them
-                            // We use a separate path for the fill to merge properly
-                            // Actually, just drawing many circles along the path works for metaball-ish look too
-
-                            // Correct Hull approach:
-                            const ang = Math.atan2(ny - py, nx - px);
-                            const off = Math.PI / 2;
-
-                            // Points on current circle
-                            const p1x = px + Math.cos(ang + off) * v.radius;
-                            const p1y = py + Math.sin(ang + off) * v.radius;
-                            const p2x = px + Math.cos(ang - off) * v.radius;
-                            const p2y = py + Math.sin(ang - off) * v.radius;
-
-                            // Points on next circle
-                            const n1x = nx + Math.cos(ang + off) * next.radius;
-                            const n1y = ny + Math.sin(ang + off) * next.radius;
-                            const n2x = nx + Math.cos(ang - off) * next.radius;
-                            const n2y = ny + Math.sin(ang - off) * next.radius;
-
-                            // Quad
-                            ctx.moveTo(p1x, p1y);
-                            ctx.lineTo(n1x, n1y);
-                            ctx.lineTo(n2x, n2y);
-                            ctx.lineTo(p2x, p2y);
+                            ctx.moveTo(cx + cr, cy);
+                            ctx.arc(cx, cy, cr, 0, Math.PI*2);
                         }
                     }
                 }
@@ -1158,7 +1158,10 @@
                 return;
             }
 
-            const dt = (timestamp - state.lastTime) / 1000;
+            // Delta time with safety clamp (max 100ms) to prevent spiraling physics/camera
+            let dt = (timestamp - state.lastTime) / 1000;
+            if (dt > 0.1) dt = 0.1;
+
             state.lastTime = timestamp;
 
             update(dt);
@@ -1361,7 +1364,26 @@
 
             // --- ATMOSPHERE (Parallax) ---
 
-            // Draw Deep Layer (ScrollFactor 0.1, Blurred)
+            // 1. Ominous Giants (ScrollFactor 0.05, Heavy Blur)
+            ctx.save();
+            ctx.translate(canvas.width/2, canvas.height/2);
+            const ominousZoom = MathUtils.lerp(1, state.camera.zoom, 0.05);
+            ctx.scale(ominousZoom, ominousZoom);
+            ctx.translate(-state.camera.x * 0.05, -state.camera.y * 0.05);
+
+            ctx.filter = 'blur(40px)';
+
+            bgOminousItems.forEach(b => {
+                b.x += 0.05; // Very slow drift
+                ctx.fillStyle = b.color;
+                ctx.globalAlpha = 0.2;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.restore();
+
+            // 2. Draw Deep Layer (ScrollFactor 0.1, Blurred)
             ctx.save();
             // Deep Layer Transform
             ctx.translate(canvas.width/2, canvas.height/2);
@@ -1749,6 +1771,12 @@
                 state.player.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
             } else if (action === 'vertebra') {
                 state.player.creature.addVertebra();
+                // Consume evolution turn immediately
+                state.player.dna = 0;
+                state.player.maxDna = Math.floor(state.player.maxDna * 1.5);
+                updateUI();
+                saveGameData();
+                closeEditor();
             }
         };
 
@@ -1775,13 +1803,10 @@
             // Check Trash
             const trash = document.getElementById('trash-zone').getBoundingClientRect();
             if (mx >= trash.left && mx <= trash.right && my >= trash.top && my <= trash.bottom) {
-                // Delete
+                // Delete logic: If dragging an existing part (future feature), remove it.
+                // For now, dragging from inventory just cancels the add.
             } else {
                 // Place on Creature (Raycast)
-                // We must use CURRENT camera transform to map Screen -> World
-                // In Editor, we force center, but zoom applies.
-
-                // World Mouse (Approx, assuming player centered)
                 const zoom = state.camera.zoom;
                 const worldMX = state.camera.x + mx / zoom;
                 const worldMY = state.camera.y + my / zoom;
@@ -1792,7 +1817,6 @@
 
                 // Check distance to spine nodes in World Space
                 state.player.creature.spine.forEach((v, idx) => {
-                    // Vertebra World Pos = PlayerPos + RelPos
                     const vx = state.player.x + v.relX;
                     const vy = state.player.y + v.relY;
 
@@ -1804,13 +1828,14 @@
                     }
                 });
 
-                // Only attach if close enough (e.g. within 2x radius)
-                if (closestV && minDist < closestV.radius * 3) {
+                // Only attach if close enough (e.g. within 3x radius for easier placement)
+                if (closestV && minDist < closestV.radius * 4) {
                     const vx = state.player.x + closestV.relX;
                     const vy = state.player.y + closestV.relY;
                     const angle = Math.atan2(worldMY - vy, worldMX - vx);
 
                     state.player.creature.parts.push(new BodyPart(drag.type, bestIdx, angle, 5, false));
+                    saveGameData(); // Auto-save on edit
                 }
             }
 
@@ -1818,12 +1843,142 @@
             document.getElementById('trash-zone').style.display = 'none';
         }
 
-        // Init Input
+        // --- SAVE SYSTEM ---
+        window.saveGameData = () => {
+            if (!state.player.creature) return;
+
+            const data = {
+                mass: state.player.mass,
+                dna: state.player.dna,
+                maxDna: state.player.maxDna,
+                color: state.player.color,
+                diet: state.player.diet,
+                spine: state.player.creature.spine.map(v => ({x: v.relX, y: v.relY, radius: v.radius})),
+                parts: state.player.creature.parts.map(p => ({
+                    type: p.type,
+                    vertebraIndex: p.vertebraIndex,
+                    angleOffset: p.angleOffset,
+                    distOffset: p.distOffset,
+                    mirrored: p.mirrored
+                }))
+            };
+            localStorage.setItem('jellyEvoSave', JSON.stringify(data));
+        };
+
+        window.loadGameData = () => {
+            const raw = localStorage.getItem('jellyEvoSave');
+            if (raw) {
+                try {
+                    const data = JSON.parse(raw);
+                    state.player.mass = data.mass || 10;
+                    state.player.dna = data.dna || 0;
+                    state.player.maxDna = data.maxDna || 100;
+                    state.player.color = data.color || '#fff';
+                    state.player.diet = data.diet || 'herbivore';
+
+                    // Reconstruct Creature
+                    if (data.spine && data.spine.length > 0) {
+                        state.player.creature = new CreatureBody(data.spine);
+                    } else {
+                        state.player.creature = new CreatureBody([{x:0, y:0, radius: CELL_BASE_RADIUS}]);
+                    }
+
+                    if (data.parts) {
+                        state.player.creature.parts = data.parts.map(p =>
+                            new BodyPart(p.type, p.vertebraIndex, p.angleOffset, p.distOffset, p.mirrored)
+                        );
+                    }
+
+                    updateUI();
+                    return true; // Loaded successfully
+                } catch (e) {
+                    console.error("Save Load Error", e);
+                    return false;
+                }
+            }
+            return false;
+        };
+
+        // Init Input (Fixed for Touch Drag)
+        // Redefine setupInput to use window listeners for drag support
+        function setupInput() {
+            const handleStart = (x, y) => {
+                if (state.editor.active) return; // Editor handles its own clicks via UI buttons
+
+                state.input.active = true;
+                state.input.startX = x;
+                state.input.startY = y;
+                state.input.currX = x;
+                state.input.currY = y;
+                state.input.distance = 0;
+            };
+
+            const handleMove = (x, y) => {
+                // Editor Drag Logic (Global)
+                if (state.editor.active && state.editor.dragging) {
+                    state.editor.dragX = x;
+                    state.editor.dragY = y;
+                    return;
+                }
+
+                if (!state.input.active) return;
+                state.input.currX = x;
+                state.input.currY = y;
+
+                const dx = x - state.input.startX;
+                const dy = y - state.input.startY;
+                state.input.angle = Math.atan2(dy, dx);
+                state.input.distance = Math.min(MathUtils.dist(0, 0, dx, dy), 50);
+            };
+
+            const handleEnd = () => {
+                if (state.editor.active && state.editor.dragging) {
+                    dropPart();
+                    return;
+                }
+                state.input.active = false;
+                state.input.distance = 0;
+            };
+
+            // Touch Listeners (Window-level to catch UI drags)
+            window.addEventListener('touchstart', e => {
+                // If touching canvas, game input. If touching UI, handled by UI.
+                if(e.target === canvas) {
+                    e.preventDefault();
+                    handleStart(e.touches[0].clientX, e.touches[0].clientY);
+                }
+            }, {passive: false});
+
+            window.addEventListener('touchmove', e => {
+                // Always prevent default scrolling if interacting
+                if (state.input.active || (state.editor.active && state.editor.dragging) || e.target === canvas) {
+                    e.preventDefault();
+                }
+
+                // If dragging UI element, we still want updates
+                handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            }, {passive: false});
+
+            window.addEventListener('touchend', e => {
+                handleEnd();
+            });
+
+            // Mouse Listeners
+            canvas.addEventListener('mousedown', e => handleStart(e.clientX, e.clientY));
+            window.addEventListener('mousemove', e => handleMove(e.clientX, e.clientY));
+            window.addEventListener('mouseup', handleEnd);
+        }
+
         setupInput();
 
-        // Check Save (Mock)
+        // Check Save
         window.onload = () => {
-             // Mock save check
+             if (loadGameData()) {
+                 // Resume button instead of start?
+                 // For now, show menu, but "Continue" is enabled
+                 const btn = document.getElementById('continue-btn-container');
+                 if(btn) btn.style.display = 'block';
+             }
         };
 
     </script>
