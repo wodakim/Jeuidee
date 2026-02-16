@@ -152,6 +152,7 @@
         #editor-ui {
             justify-content: flex-start;
             padding-top: 50px;
+            pointer-events: none; /* Let clicks pass to canvas for drag-drop */
         }
 
         .editor-panels {
@@ -159,6 +160,7 @@
             width: 90%;
             height: 70%;
             gap: 20px;
+            pointer-events: auto; /* Re-enable for UI */
         }
 
         .panel {
@@ -170,6 +172,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            overflow-y: auto;
         }
 
         .parts-grid {
@@ -184,10 +187,16 @@
             border: 1px solid rgba(255, 255, 255, 0.2);
             padding: 15px;
             border-radius: 8px;
-            cursor: pointer;
+            cursor: grab; /* Draggable indicator */
             text-align: center;
             color: #fff;
             transition: all 0.2s;
+            user-select: none;
+        }
+
+        .part-btn:active {
+            cursor: grabbing;
+            transform: scale(0.95);
         }
 
         .part-btn:hover {
@@ -198,6 +207,24 @@
         .part-icon {
             font-size: 24px;
             margin-bottom: 5px;
+        }
+
+        #trash-zone {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 100px;
+            background: rgba(255, 0, 0, 0.3);
+            border: 2px dashed red;
+            border-radius: 50%;
+            display: none; /* Flex when dragging */
+            justify-content: center;
+            align-items: center;
+            color: red;
+            font-weight: bold;
+            pointer-events: auto;
         }
 
         .hidden {
@@ -338,57 +365,52 @@
 
         <!-- Evolution Editor (New) -->
         <div id="editor-ui" class="menu-overlay interactive hidden">
-            <h1 style="font-size: 1.5rem; margin-bottom: 10px;">🧬 ORGANISM EDITOR 🧬</h1>
+            <h1 style="font-size: 1.5rem; margin-bottom: 10px; pointer-events: auto;">🧬 ORGANISM EDITOR 🧬</h1>
 
             <div class="editor-panels">
-                <!-- Left: Stats & Color -->
+                <!-- Left: Body & Stats -->
                 <div class="panel" style="flex: 0.5;">
-                    <h3>Mutation</h3>
-                    <button class="part-btn" onclick="evolve('color')" style="width: 100%; margin-bottom: 10px;">
+                    <h3>Body</h3>
+                    <button class="part-btn" onclick="editorAction('color')" style="width: 100%; margin-bottom: 10px;">
                         <div class="part-icon">🎨</div>
-                        Change Color
+                        Color
                     </button>
-                    <button class="part-btn" onclick="evolve('size')" style="width: 100%;">
-                        <div class="part-icon">💪</div>
-                        Grow Mass
+                    <button class="part-btn" onclick="editorAction('vertebra')" style="width: 100%;">
+                        <div class="part-icon">🦴</div>
+                        Add Vertebra
                     </button>
+                    <div style="margin-top:20px; text-align:center;">
+                        <p>Drag parts to body</p>
+                    </div>
                 </div>
 
-                <!-- Center: Preview (Canvas Underneath) -->
-                <!-- We let the canvas show through in the middle gap? No, overlay covers it.
-                     For Phase 3, we just use buttons that auto-place.
-                     The "Drag & Drop" is simulated by simple button clicks for now to ensure mobile stability first.
-                -->
-
-                <!-- Right: Parts -->
+                <!-- Right: Parts Inventory -->
                 <div class="panel">
-                    <h3>Add Parts</h3>
+                    <h3>Parts DNA</h3>
                     <div class="parts-grid">
-                        <button class="part-btn" onclick="evolve('speed')">
+                        <div class="part-btn" ontouchstart="startDrag(event, 'fin')" onmousedown="startDrag(event, 'fin')">
                             <div class="part-icon">⚡</div>
-                            <div>Fins</div>
-                            <small>+Speed</small>
-                        </button>
-                        <button class="part-btn" onclick="evolve('attack')">
+                            <div>Fin</div>
+                        </div>
+                        <div class="part-btn" ontouchstart="startDrag(event, 'spike')" onmousedown="startDrag(event, 'spike')">
                             <div class="part-icon">⚔️</div>
-                            <div>Spikes</div>
-                            <small>+Damage</small>
-                        </button>
-                        <button class="part-btn" onclick="evolve('eye')">
+                            <div>Spike</div>
+                        </div>
+                        <div class="part-btn" ontouchstart="startDrag(event, 'eye')" onmousedown="startDrag(event, 'eye')">
                             <div class="part-icon">👁️</div>
                             <div>Eye</div>
-                            <small>+Sight</small>
-                        </button>
-                        <button class="part-btn" onclick="evolve('tail')">
-                            <div class="part-icon">〰️</div>
-                            <div>Tail</div>
-                            <small>+Turn</small>
-                        </button>
+                        </div>
+                        <div class="part-btn" ontouchstart="startDrag(event, 'poison')" onmousedown="startDrag(event, 'poison')">
+                            <div class="part-icon">🤢</div>
+                            <div>Poison</div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <button onclick="closeEditor()" style="margin-top: 20px; background: #00ff88; color: #000;">RESUME LIFE</button>
+            <div id="trash-zone">TRASH</div>
+
+            <button onclick="closeEditor()" style="margin-top: 20px; background: #00ff88; color: #000; pointer-events: auto;">RESUME LIFE</button>
         </div>
 
     </div>
@@ -444,6 +466,14 @@
                 currY: 0,
                 angle: 0,
                 distance: 0
+            },
+
+            // Editor State
+            editor: {
+                active: false,
+                dragging: null, // { type, partRef }
+                dragX: 0,
+                dragY: 0
             },
 
             // Entities
@@ -585,6 +615,58 @@
         const bgDeepItems = [];
         const bgMidItems = [];
 
+        // --- ALGAE FOREST (Hiding Spots) ---
+        class Algae {
+            constructor(x, y, radius) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.sway = Math.random() * Math.PI * 2;
+            }
+
+            update(dt) {
+                this.sway += dt;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.fillStyle = 'rgba(0, 255, 100, 0.1)';
+                ctx.shadowColor = 'rgba(0, 255, 100, 0.3)';
+                ctx.shadowBlur = 30;
+
+                // Draw Cloud
+                ctx.beginPath();
+                // Rough cloud shape
+                for(let i=0; i<8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    const r = this.radius + Math.sin(this.sway + i) * 20;
+                    const px = Math.cos(angle) * r;
+                    const py = Math.sin(angle) * r;
+                    if(i===0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+
+                // Draw Strands
+                ctx.strokeStyle = 'rgba(0, 255, 100, 0.4)';
+                ctx.lineWidth = 3;
+                for(let i=0; i<5; i++) {
+                    const offset = (i - 2) * 20;
+                    ctx.beginPath();
+                    ctx.moveTo(offset, 20);
+                    ctx.quadraticCurveTo(
+                        offset + Math.sin(this.sway + i) * 30, -50,
+                        offset + Math.sin(this.sway * 1.5 + i) * 60, -120
+                    );
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        }
+        const algaeForests = [];
+
         function initBackground() {
             // Deep shapes
             for(let i=0; i<20; i++) {
@@ -602,16 +684,24 @@
                     r: MathUtils.randomRange(2, 8)
                 });
             }
+
+            // Algae
+            for(let i=0; i<15; i++) {
+                algaeForests.push(new Algae(
+                    MathUtils.randomRange(0, WORLD_SIZE),
+                    MathUtils.randomRange(0, WORLD_SIZE),
+                    MathUtils.randomRange(100, 200)
+                ));
+            }
         }
         initBackground();
 
-        // --- CREATURE ENGINE (Vertebrae + Skin + Parts) ---
+        // --- CREATURE ENGINE (Advanced Spine & Skin) ---
         class Vertebra {
             constructor(x, y, radius) {
                 this.x = x;
                 this.y = y;
                 this.radius = radius;
-                // Relative position to Creature center (0,0 is head usually)
                 this.relX = x;
                 this.relY = y;
             }
@@ -619,41 +709,38 @@
 
         class BodyPart {
             constructor(type, vertebraIndex, angleOffset, distOffset, mirrored = false) {
-                this.type = type; // 'spike', 'fin'
+                this.type = type; // 'spike', 'fin', 'eye', 'poison'
                 this.vertebraIndex = vertebraIndex;
                 this.angleOffset = angleOffset;
-                this.distOffset = distOffset;
+                this.distOffset = distOffset; // Distance from surface
                 this.mirrored = mirrored;
-
-                // Animation state
                 this.wobble = Math.random() * 10;
             }
 
-            draw(ctx, creatureX, creatureY, spine, dt, color) {
+            draw(ctx, creatureX, creatureY, spine, dt, color, isEditor) {
                 this.wobble += dt * 5;
-
-                // Find parent vertebra
                 const v = spine[this.vertebraIndex] || spine[0];
+                const angle = 0; // Future: Spine rotation
 
-                // Calculate position relative to creature center
-                // Basic rotation logic: parts rotate with velocity?
-                // For now, fixed orientation relative to creature.
-                // NOTE: A real rig needs rotation of vertebrae. Here we assume 0 rotation for simplicity
-                // or align with velocity if passed.
-
-                // Let's assume creature faces 'angle'.
-                const angle = 0; // Placeholder for creature rotation
-
-                const drawPart = (mirror) => {
+                const drawOne = (mirror) => {
                     const side = mirror ? -1 : 1;
                     const theta = angle + this.angleOffset * side;
 
-                    const px = creatureX + v.relX + Math.cos(theta) * (v.radius + this.distOffset);
-                    const py = creatureY + v.relY + Math.sin(theta) * (v.radius + this.distOffset);
+                    // Attach to surface: V.pos + Radius
+                    const surfaceDist = v.radius + (this.distOffset || 0);
+                    const px = creatureX + v.relX + Math.cos(theta) * surfaceDist;
+                    const py = creatureY + v.relY + Math.sin(theta) * surfaceDist;
 
                     ctx.save();
                     ctx.translate(px, py);
-                    ctx.rotate(theta + (this.type === 'fin' ? Math.sin(this.wobble)*0.2 : 0));
+                    ctx.rotate(theta + (this.type === 'fin' ? Math.sin(this.wobble)*0.2 : 0) + (mirror ? Math.PI : 0));
+
+                    // Draw Selection Highlight (Editor)
+                    if (isEditor) {
+                        ctx.strokeStyle = '#ffff00';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(-10, -10, 20, 20);
+                    }
 
                     ctx.fillStyle = color;
                     ctx.shadowColor = color;
@@ -661,106 +748,184 @@
 
                     if (this.type === 'spike') {
                         ctx.beginPath();
-                        ctx.moveTo(0, -5);
-                        ctx.lineTo(20, 0);
-                        ctx.lineTo(0, 5);
+                        ctx.moveTo(0, -5); ctx.lineTo(25, 0); ctx.lineTo(0, 5);
                         ctx.fill();
                     } else if (this.type === 'fin') {
                         ctx.beginPath();
                         ctx.moveTo(0, 0);
-                        ctx.quadraticCurveTo(15, -10, 30, 0);
-                        ctx.quadraticCurveTo(15, 10, 0, 0);
+                        ctx.quadraticCurveTo(15, -15, 35, 0);
+                        ctx.quadraticCurveTo(15, 15, 0, 0);
                         ctx.fill();
+                    } else if (this.type === 'eye') {
+                        ctx.fillStyle = '#fff';
+                        ctx.beginPath(); ctx.arc(5, 0, 8, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = '#000';
+                        ctx.beginPath(); ctx.arc(8, 0, 3, 0, Math.PI*2); ctx.fill();
                     }
                     ctx.restore();
                 };
 
-                drawPart(false);
-                if (this.mirrored) drawPart(true);
+                drawOne(false);
+                if (this.mirrored) drawOne(true);
             }
         }
 
         class CreatureBody {
             constructor(spineConfig) {
-                // spineConfig: array of {x, y, radius} relative
                 this.spine = [];
-                this.parts = []; // Array of BodyPart
-                this.softBody = null;
+                this.parts = [];
+                // We no longer use a single SoftBody for the whole creature.
+                // We use Metaballs skinning in draw().
 
-                // Init Spine
                 if (spineConfig && spineConfig.length > 0) {
                     spineConfig.forEach(v => this.spine.push(new Vertebra(v.x, v.y, v.radius)));
                 } else {
-                    // Default Single Node
                     this.spine.push(new Vertebra(0, 0, CELL_BASE_RADIUS));
                 }
 
-                // Init Skin
-                this.rebuildSkin();
+                // Animation phase for breathing
+                this.breath = 0;
+            }
+
+            addVertebra(radius = 20) {
+                const last = this.spine[this.spine.length - 1];
+                // Add behind, slightly smaller?
+                this.spine.push(new Vertebra(last.relX - radius * 1.5, last.relY, radius));
             }
 
             addPart(type) {
-                // Auto-place on random available spot for now
-                // "Evolution" logic
-                const vIndex = 0; // Head
-                const angle = Math.random() * Math.PI * 2;
-                const dist = 5;
-                const mirror = true;
-
-                this.parts.push(new BodyPart(type, vIndex, angle, dist, mirror));
-            }
-
-            rebuildSkin() {
-                // Generate a hull polygon around all vertebrae
-                // For now, simple implementation: A SoftBody around the "Average Center"
-                // with radius covering the furthest vertebra.
-                // NOTE: Full metaball skinning is complex for a "Single File" constrained update without WebGL shaders.
-                // We will approximate by creating a SoftBody that encompasses the bounding box of the spine.
-
-                // 1. Calculate Bounds
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                this.spine.forEach(v => {
-                    minX = Math.min(minX, v.relX - v.radius);
-                    maxX = Math.max(maxX, v.relX + v.radius);
-                    minY = Math.min(minY, v.relY - v.radius);
-                    maxY = Math.max(maxY, v.relY + v.radius);
-                });
-
-                const width = maxX - minX;
-                const height = maxY - minY;
-                const radius = Math.max(width, height) / 2;
-
-                // Create/Reuse SoftBody
-                // Note: This effectively keeps the circular blob look for now but prepares the data structure.
-                // To support "Long" creatures, we would need multiple overlapping SoftBodies or a custom mesh.
-                // Let's stick to the single SoftBody for Phase 2 compatibility but position it correctly.
-
-                this.softBody = new SoftBody(radius, 16, 5, 0.5);
-            }
-
-            addVertebra(radius) {
-                // Add new segment behind the last one
-                const last = this.spine[this.spine.length - 1];
-                this.spine.push(new Vertebra(last.relX - radius * 1.5, last.relY, radius)); // Offset X
-                this.rebuildSkin();
+                // Default place on head
+                this.parts.push(new BodyPart(type, 0, 0, 0, true));
             }
 
             update(dt, vx, vy, mass) {
-                if(this.softBody) this.softBody.update(dt, vx, vy, mass);
+                this.breath += dt * 2;
+                // Simulate spine physics (trailing)
+                // Head follows position, subsequent nodes trail behind
+                // NOTE: Since x,y are passed to draw, the spine stores RELATIVE offsets?
+                // Or absolute? Let's keep spine Relative to Head (0,0) for simpler logic,
+                // but animate the relative offsets to simulate drag.
+
+                // Simple drag simulation on spine nodes
+                for(let i=1; i<this.spine.length; i++) {
+                    const prev = this.spine[i-1];
+                    const curr = this.spine[i];
+
+                    // Ideal distance
+                    const spacing = (prev.radius + curr.radius) * 0.8;
+                    const dx = curr.relX - prev.relX;
+                    const dy = curr.relY - prev.relY;
+                    const dist = Math.hypot(dx, dy);
+
+                    // Spring back to spacing
+                    if (dist > 0) {
+                        const lerpFactor = 5 * dt;
+                        // Target pos: behind previous node based on velocity?
+                        // Simplified: Just keep distance constraint
+                        const scale = spacing / dist;
+                        const tx = prev.relX + dx * scale;
+                        const ty = prev.relY + dy * scale;
+
+                        curr.relX = MathUtils.lerp(curr.relX, tx, lerpFactor);
+                        curr.relY = MathUtils.lerp(curr.relY, ty, lerpFactor);
+                    }
+                }
             }
 
-            draw(ctx, x, y, color) {
-                // Draw Skin
-                if(this.softBody) this.softBody.draw(ctx, x, y, color);
+            draw(ctx, x, y, color, isEditor = false) {
+                // 1. Draw Skin (Metaballs Algorithm)
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 20;
+                ctx.fillStyle = color;
 
-                // Draw Parts
-                // We need rotation info... passed or stored?
-                // Currently SoftBody doesn't store rotation.
-                // Let's pass 0 for now, or update BodyPart to handle rotation.
-                const dt = 0.016; // Hack: need real dt passed to draw? Or update?
-                // Let's rely on draw loop dt? No, simple animation.
+                ctx.beginPath();
 
-                this.parts.forEach(p => p.draw(ctx, x, y, this.spine, dt, color));
+                // Draw connections between vertebrae
+                // For each pair, draw a smooth skin hull
+                if (this.spine.length === 1) {
+                    ctx.arc(x + this.spine[0].relX, y + this.spine[0].relY, this.spine[0].radius, 0, Math.PI*2);
+                } else {
+                    // Complex hull drawing
+                    // We need to find tangent lines between circles
+                    // For simplicity in Canvas, we can just draw circles and thick lines?
+                    // Better: Draw circles and fill rects between them, smoothed by lineJoin='round'
+
+                    ctx.lineJoin = 'round';
+                    ctx.lineCap = 'round';
+
+                    for (let i = 0; i < this.spine.length; i++) {
+                        const v = this.spine[i];
+                        const px = x + v.relX;
+                        const py = y + v.relY;
+
+                        // Draw circle
+                        ctx.moveTo(px + v.radius, py);
+                        ctx.arc(px, py, v.radius, 0, Math.PI*2);
+
+                        // Draw connection to next
+                        if (i < this.spine.length - 1) {
+                            const next = this.spine[i+1];
+                            const nx = x + next.relX;
+                            const ny = y + next.relY;
+
+                            // Thick line connecting them
+                            // We use a separate path for the fill to merge properly
+                            // Actually, just drawing many circles along the path works for metaball-ish look too
+
+                            // Correct Hull approach:
+                            const ang = Math.atan2(ny - py, nx - px);
+                            const off = Math.PI / 2;
+
+                            // Points on current circle
+                            const p1x = px + Math.cos(ang + off) * v.radius;
+                            const p1y = py + Math.sin(ang + off) * v.radius;
+                            const p2x = px + Math.cos(ang - off) * v.radius;
+                            const p2y = py + Math.sin(ang - off) * v.radius;
+
+                            // Points on next circle
+                            const n1x = nx + Math.cos(ang + off) * next.radius;
+                            const n1y = ny + Math.sin(ang + off) * next.radius;
+                            const n2x = nx + Math.cos(ang - off) * next.radius;
+                            const n2y = ny + Math.sin(ang - off) * next.radius;
+
+                            // Quad
+                            ctx.moveTo(p1x, p1y);
+                            ctx.lineTo(n1x, n1y);
+                            ctx.lineTo(n2x, n2y);
+                            ctx.lineTo(p2x, p2y);
+                        }
+                    }
+                }
+
+                ctx.fill();
+                ctx.restore();
+
+                // 2. Editor Overlay (Green Vertebrae)
+                if (isEditor) {
+                    ctx.save();
+                    this.spine.forEach(v => {
+                        const px = x + v.relX;
+                        const py = y + v.relY;
+
+                        // Bone
+                        ctx.fillStyle = '#00ff00';
+                        ctx.globalAlpha = 0.5;
+                        ctx.beginPath();
+                        ctx.arc(px, py, v.radius * 0.8, 0, Math.PI*2); // Inner bone
+                        ctx.fill();
+
+                        // Connector
+                        // ctx.strokeStyle = '#00ff00';
+                        // ctx.stroke();
+                    });
+                    ctx.restore();
+                }
+
+                // 3. Draw Parts
+                const dt = 0.016;
+                this.parts.forEach(p => p.draw(ctx, x, y, this.spine, dt, color, isEditor));
             }
         }
 
@@ -897,6 +1062,12 @@
         // --- INPUT HANDLING ---
         function setupInput() {
             const handleStart = (x, y) => {
+                if (state.editor.active) {
+                    // Editor Interaction (Selection / Vertebrae click)
+                    // If not dragging logic handled by UI events
+                    return;
+                }
+
                 state.input.active = true;
                 state.input.startX = x;
                 state.input.startY = y;
@@ -906,6 +1077,13 @@
             };
 
             const handleMove = (x, y) => {
+                // Editor Drag
+                if (state.editor.active && state.editor.dragging) {
+                    state.editor.dragX = x;
+                    state.editor.dragY = y;
+                    return;
+                }
+
                 if (!state.input.active) return;
                 state.input.currX = x;
                 state.input.currY = y;
@@ -917,27 +1095,37 @@
             };
 
             const handleEnd = () => {
+                if (state.editor.active && state.editor.dragging) {
+                    dropPart();
+                    return;
+                }
+
                 state.input.active = false;
                 state.input.distance = 0;
             };
 
             // Touch
             canvas.addEventListener('touchstart', e => {
-                e.preventDefault();
+                // Check if target is UI button, let it pass?
+                // e.preventDefault(); // removed to allow button clicks?
+                // But we need preventDefault to stop scroll/zoom.
+                // UI buttons are overlay, they catch events first if pointer-events:auto
+                if(e.target === canvas) e.preventDefault();
                 handleStart(e.touches[0].clientX, e.touches[0].clientY);
             }, {passive: false});
 
             canvas.addEventListener('touchmove', e => {
-                e.preventDefault();
+                if(e.target === canvas) e.preventDefault();
                 handleMove(e.touches[0].clientX, e.touches[0].clientY);
             }, {passive: false});
 
             canvas.addEventListener('touchend', e => {
-                e.preventDefault();
+                if(e.target === canvas) e.preventDefault();
                 handleEnd();
             });
 
             // Mouse (for testing)
+            // Listen on window for move/up to catch drags outside canvas
             canvas.addEventListener('mousedown', e => handleStart(e.clientX, e.clientY));
             window.addEventListener('mousemove', e => handleMove(e.clientX, e.clientY));
             window.addEventListener('mouseup', handleEnd);
@@ -960,8 +1148,16 @@
         }
 
         function update(dt) {
+            // Pause logic if Editor is open
+            if (state.editor.active) {
+                return;
+            }
+
             // Update Particles
             particles.update(dt);
+
+            // Update Algae
+            algaeForests.forEach(a => a.update(dt));
 
             // 1. Player Movement
             if (state.input.active) {
@@ -1053,13 +1249,46 @@
                 const e = state.enemies[i];
                 e.update(dt);
 
+                // Algae Logic (Safety / Damage)
+                let inAlgae = false;
+                for(const alg of algaeForests) {
+                    if (MathUtils.dist(e.x, e.y, alg.x, alg.y) < alg.radius) {
+                        inAlgae = true;
+                        if (e.type === 'aggressor') {
+                            // Carnivores take damage/slow in algae
+                            e.vx *= 0.9;
+                            e.vy *= 0.9;
+                            // e.mass -= dt; // Slowly die?
+                        }
+                    }
+                }
+
+                // AI Adjustment: Carnivores flee algae?
+
+                // Enemy Eating Food Logic
+                // Simple collision with food
+                for (let j = state.foods.length - 1; j >= 0; j--) {
+                    const f = state.foods[j];
+                    if (MathUtils.dist(e.x, e.y, f.x, f.y) < e.radius + f.radius) {
+                        // Only eat matching diet
+                        let canEat = false;
+                        if (e.type === 'grazer' && f.type === 'plant') canEat = true;
+                        if (e.type === 'aggressor' && f.type === 'meat') canEat = true;
+
+                        if (canEat) {
+                            state.foods.splice(j, 1);
+                            e.evolutionPoints += 1;
+                            // Chance to spawn food to replenish
+                            if(Math.random() < 0.1) spawnFood(1);
+                        }
+                    }
+                }
+
                 // Collision with Player
                 const d = MathUtils.dist(state.player.x, state.player.y, e.x, e.y);
                 if (d < state.player.radius + e.radius) {
                     // Player Larger?
                     if (state.player.mass > e.mass * 1.1) {
-                        // Eat Enemy (if Carnivore or just dominance?)
-                        // "Carnivores eat Red food + Smaller enemies"
                         if (state.player.diet === 'carnivore') {
                             // Splat FX
                             particles.emit(e.x, e.y, e.color, 15, 150);
@@ -1077,13 +1306,19 @@
                         }
                     }
                     else if (e.mass > state.player.mass * 1.1) {
-                        // Player Smaller -> Take Damage / Knockback
+                        // Player Smaller -> Take Damage
                         const angle = Math.atan2(state.player.y - e.y, state.player.x - e.x);
                         state.player.vx = Math.cos(angle) * 400;
                         state.player.vy = Math.sin(angle) * 400;
 
-                        // Hurt (Lose DNA/Mass)
-                        // Simple flash handled in draw? We need state.
+                        // Player Damage
+                        state.player.mass -= 1; // Lose mass
+                        if (state.player.mass <= 5) {
+                            // Game Over Logic (Respawn for now)
+                            alert("YOU DIED - Eaten by a larger predator");
+                            window.location.reload();
+                        }
+                        updateUI();
                     }
                 }
             }
@@ -1136,6 +1371,9 @@
             // Apply Main Camera Transform
             ctx.scale(state.camera.zoom, state.camera.zoom);
             ctx.translate(-state.camera.x, -state.camera.y);
+
+            // Draw Algae (Background Layer of World)
+            algaeForests.forEach(a => a.draw(ctx));
 
             // Draw Food
             state.foods.forEach(f => {
@@ -1405,46 +1643,101 @@
 
         // --- EDITOR LOGIC ---
         function openEditor() {
+            state.editor.active = true;
             document.getElementById('editor-ui').classList.remove('hidden');
-            state.running = false;
+            state.running = true; // Keep loop running for render (paused update)
+            // But skip update logic
         }
 
         window.closeEditor = () => {
+            state.editor.active = false;
             document.getElementById('editor-ui').classList.add('hidden');
-            state.running = true;
             state.lastTime = performance.now();
-            requestAnimationFrame(gameLoop);
-        };
 
-        window.evolve = (type) => {
-            // Apply Mutation
-            if (type === 'speed') {
-                state.player.speed += 50;
-                if (state.player.creature) state.player.creature.addPart('fin');
-            }
-            if (type === 'attack') {
-                if (state.player.creature) state.player.creature.addPart('spike');
-            }
-            if (type === 'size') state.player.mass += 20;
-            if (type === 'color') state.player.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
-
-            // Cost? For now, Evolution allows 1 choice per "Level Up".
-            // Reset Progress
+            // Reset DNA cost only on exit? Or pay as you go?
+            // "DNA is full" -> Open Editor.
+            // Let's reset DNA now assuming changes were made.
             state.player.dna = 0;
             state.player.maxDna = Math.floor(state.player.maxDna * 1.5);
-
             updateUI();
-
-            // Save immediately
-            // But DON'T close editor automatically anymore?
-            // Allow multiple tweaks?
-            // Requirements: "Trigger when DNA is full... pause game".
-            // Spore style: You enter editor, spend points, then leave.
-            // Current Logic: DNA = 1 Mutation Credit.
-            // So we choose ONE thing then leave.
-
-            closeEditor();
+            saveGameData();
         };
+
+        // Editor Actions (Buttons)
+        window.editorAction = (action) => {
+            if (action === 'color') {
+                state.player.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            } else if (action === 'vertebra') {
+                state.player.creature.addVertebra();
+            }
+        };
+
+        // Drag & Drop Logic
+        window.startDrag = (e, type) => {
+            // e.preventDefault(); // Stop text selection
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            state.editor.dragging = { type: type };
+            state.editor.dragX = clientX;
+            state.editor.dragY = clientY;
+
+            document.getElementById('trash-zone').style.display = 'flex';
+        };
+
+        function dropPart() {
+            const drag = state.editor.dragging;
+            if (!drag) return;
+
+            const mx = state.editor.dragX;
+            const my = state.editor.dragY;
+
+            // Check Trash
+            const trash = document.getElementById('trash-zone').getBoundingClientRect();
+            if (mx >= trash.left && mx <= trash.right && my >= trash.top && my <= trash.bottom) {
+                // Delete
+            } else {
+                // Place on Creature
+                // Raycast: Find closest point on skin
+                // Simplified: Find closest vertebra
+                let closestV = null;
+                let minDist = Infinity;
+
+                // Screen coordinates of creature center (it's centered on screen in editor usually?)
+                // Camera is tracking player. So player is at Center of Canvas.
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+
+                let bestIdx = 0;
+
+                state.player.creature.spine.forEach((v, idx) => {
+                    const vx = cx + v.relX; // relative to center
+                    const vy = cy + v.relY;
+                    const d = MathUtils.dist(mx, my, vx, vy);
+                    if (d < minDist) {
+                        minDist = d;
+                        closestV = v;
+                        bestIdx = idx;
+                    }
+                });
+
+                // Angle from vertebra center
+                const vx = cx + closestV.relX;
+                const vy = cy + closestV.relY;
+                const angle = Math.atan2(my - vy, mx - vx);
+
+                // Add Part
+                // angleOffset relative to creature rotation (0 in editor)
+                state.player.creature.parts.push(new BodyPart(drag.type, bestIdx, angle, 5, false));
+            }
+
+            state.editor.dragging = null;
+            document.getElementById('trash-zone').style.display = 'none';
+        }
+
+        // Mod render to handle Editor State
+        const originalRender = render;
+        // render = ... moved below
 
         // Init Input
         setupInput();

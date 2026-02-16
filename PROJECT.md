@@ -39,19 +39,20 @@ A high-performance, single-file HTML5/JS game simulating cellular evolution. The
     *   Particle system for eating/combat.
     *   Physics-based knockback (No Screen Shake).
 
-### Phase 3: Deep Evolution & Atmosphere (Current Goal)
-*   **Abyssal Atmosphere:**
-    *   Multi-layer Parallax (Deep blur blobs, Midground bubbles).
-    *   Removal of debug grid.
-*   **Creature Editor Engine (The "Spore" Core):**
-    *   **Vertebrae System:** Player is no longer a single circle but a spine of interconnected nodes (vertebrae).
-    *   **Skinning:** Procedural hull generation around the spine (Metaballs/Convex Hull).
-    *   **Parts Placement:** Drag-and-drop placement of parts (Spikes, Fins) onto the skin surface.
-    *   **Mirror Mode:** Option to symmetry parts.
-*   **Evolution UI:**
-    *   Full-screen "Editor Mode" overlay.
-    *   Sliders for vertebra size/position.
-    *   Palette for parts.
+### Phase 3: Complex Life & Survival (Current Goal)
+*   **Advanced Creature Engine (Spine & Skin):**
+    *   **Vertebrae:** Connected nodes with elastic constraints. Visible/Editable in Editor.
+    *   **Metaball Skinning:** Smooth hull generation around variable-sized vertebrae.
+*   **Editor 2.0:**
+    *   **Drag & Drop:** Free placement of parts on the skin.
+    *   **Inventory:** Remove/Reorganize parts.
+    *   **Vertebrae Editing:** Add/Resize vertebrae nodes.
+*   **Autonomous Ecosystem:**
+    *   Enemies eat, grow, and evolve (change size/parts) autonomously.
+    *   Player Death: HP linked to Mass/Vertebrae. Game Over state.
+*   **Herbivore Defense:**
+    *   **Poison Glands:** Leave toxic trails.
+    *   **Hiding Spots (Algae):** Safe zones for Herbivores, dangerous for Carnivores.
 
 ### Phase 4: Audio & Polish
 *   **Procedural Audio:** (Optional) Web Audio API to generate simple ambient sounds and SFX.
