@@ -1,0 +1,110 @@
+/* Custom Font */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+/* Reset & Basics */
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #000;
+    font-family: 'Orbitron', sans-serif;
+    color: #fff;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+#game-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* UI Overlay */
+#ui-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.interactive {
+    pointer-events: auto;
+}
+
+/* HUD */
+#hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.stat-panel {
+    background: rgba(0, 20, 40, 0.7);
+    border: 1px solid rgba(0, 255, 255, 0.3);
+    padding: 10px;
+    border-radius: 8px;
+    backdrop-filter: blur(5px);
+    color: #0ff;
+    text-shadow: 0 0 5px #0ff;
+}
+
+/* DNA Bar */
+#dna-bar-container {
+    width: 200px;
+    height: 15px;
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 5px;
+}
+
+#dna-fill {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #00ffff, #00ff88);
+    box-shadow: 0 0 10px #00ff88;
+    transition: width 0.3s ease-out;
+}
+
+/* Joystick Area (Invisible but functional) */
+#joystick-area {
+    position: absolute;
+    bottom: 50px;
+    left: 50px;
+    width: 150px;
+    height: 150px;
+    /* border: 1px dashed rgba(255, 255, 255, 0.1); For debugging */
+    pointer-events: auto;
+}
+
+/* Ad Placeholder */
+#ad-banner {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    height: 50px;
+    background: #111;
+    color: #555;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.8em;
+    border-top: 1px solid #333;
+    pointer-events: auto;
+}
