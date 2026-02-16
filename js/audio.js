@@ -55,16 +55,29 @@ export default class AudioSystem {
         this.droneOsc = { osc, mod, gain };
     }
 
-    playTone(freq, type, duration) {
+    playTone(freq, type, duration, x = 0, y = 0, camera = null) {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
+        const panner = this.ctx.createStereoPanner();
+
+        // Spatial Audio Logic
+        if (camera) {
+            // Screen width is roughly camera.viewportWidth / camera.zoom
+            // Let's approximate. Center is camera.x, camera.y
+            const relX = (x - camera.x);
+            // Normalize roughly. View width varies.
+            // Let's assume view width ~1000 world units at zoom 1
+            const pan = Math.max(-1, Math.min(1, relX / (500 / camera.zoom)));
+            panner.pan.value = pan;
+        }
 
         osc.type = type;
         osc.frequency.value = freq;
 
         osc.connect(gain);
-        gain.connect(this.masterGain);
-        gain.connect(this.delay); // Send to reverb
+        gain.connect(panner);
+        panner.connect(this.masterGain);
+        panner.connect(this.delay); // Send to reverb
 
         const now = this.ctx.currentTime;
         gain.gain.setValueAtTime(0.3, now);
@@ -74,9 +87,9 @@ export default class AudioSystem {
         osc.stop(now + duration);
     }
 
-    playEat() {
-        this.playTone(300 + Math.random() * 200, 'triangle', 0.1);
-        this.playTone(500 + Math.random() * 200, 'sine', 0.15);
+    playEat(x, y, camera) {
+        this.playTone(300 + Math.random() * 200, 'triangle', 0.1, x, y, camera);
+        this.playTone(500 + Math.random() * 200, 'sine', 0.15, x, y, camera);
     }
 
     playDash() {

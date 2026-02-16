@@ -312,16 +312,29 @@ class AudioSystem {
         this.droneOsc = { osc, mod, gain };
     }
 
-    playTone(freq, type, duration) {
+    playTone(freq, type, duration, x = 0, y = 0, camera = null) {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
+        const panner = this.ctx.createStereoPanner();
+
+        // Spatial Audio Logic
+        if (camera) {
+            // Screen width is roughly camera.viewportWidth / camera.zoom
+            // Let's approximate. Center is camera.x, camera.y
+            const relX = (x - camera.x);
+            // Normalize roughly. View width varies.
+            // Let's assume view width ~1000 world units at zoom 1
+            const pan = Math.max(-1, Math.min(1, relX / (500 / camera.zoom)));
+            panner.pan.value = pan;
+        }
 
         osc.type = type;
         osc.frequency.value = freq;
 
         osc.connect(gain);
-        gain.connect(this.masterGain);
-        gain.connect(this.delay); // Send to reverb
+        gain.connect(panner);
+        panner.connect(this.masterGain);
+        panner.connect(this.delay); // Send to reverb
 
         const now = this.ctx.currentTime;
         gain.gain.setValueAtTime(0.3, now);
@@ -331,9 +344,9 @@ class AudioSystem {
         osc.stop(now + duration);
     }
 
-    playEat() {
-        this.playTone(300 + Math.random() * 200, 'triangle', 0.1);
-        this.playTone(500 + Math.random() * 200, 'sine', 0.15);
+    playEat(x, y, camera) {
+        this.playTone(300 + Math.random() * 200, 'triangle', 0.1, x, y, camera);
+        this.playTone(500 + Math.random() * 200, 'sine', 0.15, x, y, camera);
     }
 
     playDash() {
@@ -739,13 +752,28 @@ class Renderer {
         if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
 
         const points = creature.points;
-        const color = creature.color || '#00ffff';
+        let color = creature.color || '#00ffff';
+
+        // Diegetic Health: Modulate color/intensity
+        const healthPct = creature.gameStats.health / creature.gameStats.maxHealth;
+
+        // Flash Red on Damage
+        if (creature.lastDamageTime && Date.now() - creature.lastDamageTime < 200) {
+            color = '#ff0000';
+        } else if (healthPct < 0.3) {
+            // Pulse Red when low
+            const pulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
+            color = pulse > 0.5 ? '#ff0000' : color;
+        }
 
         for (let i = points.length - 1; i >= 0; i--) {
             const p = points[i];
 
+            // Glow intensity based on health
+            const glowSize = 2.5 * (0.5 + 0.5 * healthPct);
+
             // Glow
-            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2.5);
+            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * glowSize);
             grad.addColorStop(0, color);
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
@@ -1192,14 +1220,15 @@ class Input {
 
 
 class Enemy {
-    constructor(x, y, difficulty, physics) {
+    constructor(x, y, difficulty, physics, type = 'hunter') {
         this.physics = physics;
         this.active = true;
         this.difficulty = difficulty; // 1 to 10+
+        this.type = type; // 'hunter', 'grazer', 'titan'
 
         // Procedural Generation
         this.scale = 1 + (difficulty * 0.2); // Growth
-        this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
+        this.color = type === 'grazer' ? `hsl(${100 + Math.random() * 50}, 70%, 50%)` : `hsl(${Math.random() * 360}, 70%, 50%)`;
 
         // Body
         this.points = [];
@@ -1213,9 +1242,9 @@ class Enemy {
         this.stats.calculate(this.parts);
 
         // Base stats scaling
-        this.stats.speed = 300 + difficulty * 50;
+        this.stats.speed = (300 + difficulty * 50) * (type === 'grazer' ? 0.8 : 1.0);
         this.stats.damage = 5 + difficulty * 2;
-        this.health = 20 + difficulty * 10;
+        this.health = (20 + difficulty * 10) * (type === 'titan' ? 5 : 1);
         this.maxHealth = this.health;
 
         // AI State
@@ -1223,11 +1252,14 @@ class Enemy {
         this.targetX = x;
         this.targetY = y;
         this.stateTimer = 0;
+
+        // Flocking
+        this.flockId = -1;
     }
 
     createBody(x, y) {
-        const segs = 3 + Math.floor(this.difficulty / 3);
-        const rad = 15 * this.scale;
+        const segs = this.type === 'titan' ? 10 : (3 + Math.floor(this.difficulty / 3));
+        const rad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
 
         for (let i = 0; i < segs; i++) {
             const p = this.physics.constructor.createPoint(x, y + i * rad, rad * (1 - i*0.1), 1 + this.difficulty * 0.5);
@@ -1242,6 +1274,13 @@ class Enemy {
     }
 
     generateParts() {
+        if (this.type === 'grazer') {
+            // Grazers have fins mostly
+            this.parts.push({ type: 'Fin', boneIndex: 1, side: 1 });
+            this.parts.push({ type: 'Fin', boneIndex: 1, side: -1 });
+            return;
+        }
+
         const partCount = Math.floor(this.difficulty);
 
         for(let i=0; i<partCount; i++) {
@@ -1265,11 +1304,11 @@ class Enemy {
         // Steering
         let head = this.points[0];
         let dx = 0, dy = 0;
-        const distToPlayer = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
 
-        // Logic: if difficulty > player (proxy by scale?), chase.
-        // We don't know player stats here easily, so use distance or random behavior.
-        // Let's assume if dist < 400 * scale, react.
+        // Boids Logic overrides standard steering if in a flock and type is grazer
+        // This is handled by BoidManager, but we need to respect the result.
+        // Actually, let's allow BoidManager to modify position/velocity directly,
+        // and here we add the "Goal" steering (Chase/Flee/Wander).
 
         if (this.state === 'chase') {
             dx = playerHead.x - head.x;
@@ -1286,8 +1325,11 @@ class Enemy {
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
             const force = this.stats.speed * dt * dt; // Apply as impulse
-            head.x += (dx / dist) * force;
-            head.y += (dy / dist) * force;
+            // If grazer, reduce individual steering influence to let flocking work better
+            const weight = this.type === 'grazer' ? 0.3 : 1.0;
+
+            head.x += (dx / dist) * force * weight;
+            head.y += (dy / dist) * force * weight;
         }
 
         // Physics
@@ -1298,9 +1340,11 @@ class Enemy {
         this.stateTimer = Math.random() * 3 + 1;
 
         const dist = Math.hypot(playerHead.x - this.points[0].x, playerHead.y - this.points[0].y);
-        if (dist < 400 * this.scale) {
+        const aggroRange = this.type === 'grazer' ? 200 : 400 * this.scale;
+
+        if (dist < aggroRange) {
              // Aggressive if difficulty is high
-             if (this.difficulty > 3) this.state = 'chase';
+             if (this.type !== 'grazer' && this.difficulty > 3) this.state = 'chase';
              else this.state = 'flee';
         } else {
             this.state = 'wander';
@@ -1363,6 +1407,158 @@ class Enemy {
                  ctx.fill();
              }
              ctx.restore();
+        });
+
+        ctx.restore();
+    }
+}
+
+
+// --- js/boids.js ---
+
+
+class BoidManager {
+    constructor(physics) {
+        this.physics = physics;
+        this.flocks = [];
+    }
+
+    createFlock(x, y, count, difficulty, type = 'grazer') {
+        const flock = [];
+        const flockId = Math.floor(Math.random() * 10000);
+        for (let i = 0; i < count; i++) {
+            // Spawn close to center
+            const ex = x + (Math.random() - 0.5) * 200;
+            const ey = y + (Math.random() - 0.5) * 200;
+            const enemy = new Enemy(ex, ey, difficulty, this.physics, type);
+            enemy.flockId = flockId;
+            flock.push(enemy);
+        }
+        this.flocks.push(flock);
+        return flock;
+    }
+
+    update(dt, enemies) {
+        const separationDist = 80;
+        const cohesionDist = 200;
+
+        enemies.forEach(e => {
+            if (e.type !== 'grazer') return;
+
+            let sepX = 0, sepY = 0;
+            let cohX = 0, cohY = 0;
+            let count = 0;
+
+            const head = e.points[0];
+
+            enemies.forEach(other => {
+                if (e === other || other.type !== 'grazer') return;
+                // Only flock with same flockId? Or all grazers? Let's say all grazers for now, or use flockId if we want distinct groups.
+                // Using flockId makes them stay in their spawn groups.
+                if (e.flockId !== other.flockId) return;
+
+                const otherHead = other.points[0];
+                const dist = Math.hypot(head.x - otherHead.x, head.y - otherHead.y);
+
+                if (dist < cohesionDist) {
+                    // Separation
+                    if (dist < separationDist && dist > 0) {
+                        sepX += (head.x - otherHead.x) / dist; // Push away
+                        sepY += (head.y - otherHead.y) / dist;
+                    }
+
+                    // Cohesion
+                    cohX += otherHead.x;
+                    cohY += otherHead.y;
+
+                    count++;
+                }
+            });
+
+            if (count > 0) {
+                // Apply forces (Soft Body impulse)
+                const sepForce = 8000; // Strong separation
+                head.x += sepX * sepForce * dt * dt;
+                head.y += sepY * sepForce * dt * dt;
+
+                // Cohesion
+                cohX /= count;
+                cohY /= count;
+                const cohDirX = cohX - head.x;
+                const cohDirY = cohY - head.y;
+                const cohForce = 200;
+
+                head.x += cohDirX * cohForce * dt * dt;
+                head.y += cohDirY * cohForce * dt * dt;
+            }
+        });
+    }
+}
+
+
+// --- js/debris.js ---
+class Debris {
+    constructor(points, constraints, color, life = 5) {
+        this.points = points;
+        this.constraints = constraints;
+        this.color = color;
+        this.life = life;
+        this.active = true;
+
+        // Tearing: Remove random constraints to simulate destruction
+        if (this.constraints.length > 2) {
+            const removeCount = Math.ceil(this.constraints.length * 0.4);
+            for(let i=0; i<removeCount; i++) {
+                const idx = Math.floor(Math.random() * this.constraints.length);
+                this.constraints.splice(idx, 1);
+            }
+        }
+
+        // Explosion Impulse
+        const center = this.getCenter();
+        this.points.forEach(p => {
+             const dx = p.x - center.x;
+             const dy = p.y - center.y;
+             const dist = Math.hypot(dx, dy) || 1;
+             const force = 100 * Math.random();
+             p.oldx -= (dx/dist) * force * 0.016; // Impulse
+             p.oldy -= (dy/dist) * force * 0.016;
+        });
+    }
+
+    getCenter() {
+        let x=0, y=0;
+        this.points.forEach(p => { x+=p.x; y+=p.y; });
+        return { x: x/this.points.length, y: y/this.points.length };
+    }
+
+    update(dt, physics) {
+        physics.update(this.points, this.constraints, dt);
+        this.life -= dt;
+        if (this.life <= 0) this.active = false;
+
+        // Fade out shrinking
+        if (this.life < 2) {
+             this.constraints.forEach(c => c.length *= 0.99);
+             this.points.forEach(p => p.radius *= 0.99);
+        }
+    }
+
+    render(ctx) {
+        if (!this.active) return;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, this.life * 0.5); // Start semi-transparent
+
+        // Render blobs around constraints
+        ctx.strokeStyle = this.color;
+        ctx.lineCap = 'round';
+
+        this.constraints.forEach(c => {
+            ctx.lineWidth = (c.p1.radius + c.p2.radius) * 0.8;
+            ctx.beginPath();
+            ctx.moveTo(c.p1.x, c.p1.y);
+            ctx.lineTo(c.p2.x, c.p2.y);
+            ctx.stroke();
         });
 
         ctx.restore();
@@ -1820,6 +2016,8 @@ class Editor {
 
 
 
+
+
 class GameLoop {
     constructor() {
         this.running = false;
@@ -1852,6 +2050,7 @@ class GameLoop {
         this.saveManager = new SaveManager(this);
         this.progression = new Progression(this.saveManager);
         this.assets = new AssetGenerator();
+        this.boidManager = new BoidManager(this.physics);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
@@ -1864,6 +2063,7 @@ class GameLoop {
 
         this.enemies = [];
         this.food = [];
+        this.debris = [];
         this.particles = [];
         this.hitstop = 0;
         this.gameState = 'menu'; // menu, playing, gameover, paused
@@ -2000,6 +2200,9 @@ class GameLoop {
     triggerUnlock(partKey) {
         if (this.progression.unlock(partKey)) {
             this.pauseGame(true); // True = Unlock Mode
+            // Haptic Pattern
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
+
             const overlay = document.getElementById('unlock-overlay');
             const part = PARTS_DB[partKey];
             overlay.innerHTML = `
@@ -2150,19 +2353,27 @@ class GameLoop {
     }
 
     spawnEnemies() {
-        const targetCount = 6;
+        const targetCount = 12; // Increased for flocks
         if (this.enemies.length >= targetCount) return;
-        const count = targetCount - this.enemies.length;
+
         const playerScale = Math.sqrt(this.creature.gameStats.mass / 10);
         const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
         const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
-        for(let i=0; i<count; i++) {
-            const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 1000 + Math.random() * 1000;
-            const ex = playerX + Math.cos(angle) * dist;
-            const ey = playerY + Math.sin(angle) * dist;
-            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics));
+
+        const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 1000 + Math.random() * 500;
+        const ex = playerX + Math.cos(angle) * dist;
+        const ey = playerY + Math.sin(angle) * dist;
+
+        if (Math.random() < 0.4) {
+            // Spawn Flock (Grazers)
+            const flockSize = 3 + Math.floor(Math.random() * 4);
+            const flock = this.boidManager.createFlock(ex, ey, flockSize, difficulty, 'grazer');
+            this.enemies.push(...flock);
+        } else {
+            // Spawn Hunter (Solo)
+            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
         }
     }
 
@@ -2270,12 +2481,14 @@ class GameLoop {
 
                 this.spawnParticles(head.x, head.y, '#fff', 20, 300);
                 if(this.settings.audioEnabled) this.audio.playDash();
+                if(navigator.vibrate) navigator.vibrate(50); // Short haptic
             }
         }
 
         this.physics.update(this.creature.points, this.creature.constraints, dt);
         this.updateBackgroundOnly(dt);
         this.spawnEnemies();
+        this.boidManager.update(dt, this.enemies);
 
         const playerRadius = head.radius;
         for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -2289,10 +2502,19 @@ class GameLoop {
                 const mx = (head.x + e.points[0].x) / 2;
                 const my = (head.y + e.points[0].y) / 2;
                 this.hitstop = 0.05;
+                this.creature.lastDamageTime = Date.now(); // For red flash
+                if(navigator.vibrate) navigator.vibrate(200); // Heavy haptic impact
+
                 this.spawnParticles(mx, my, '#ff0044', 5, 200);
                 if (e.health <= 0) {
-                     this.spawnParticles(mx, my, '#ffaa00', 20, 400);
+                     this.spawnParticles(mx, my, '#ffaa00', 10, 400);
                      this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
+
+                     // Spawn Debris
+                     // Detach points/constraints from enemy instance effectively by passing them to Debris
+                     this.debris.push(new Debris(e.points, e.constraints, e.color, 4));
+
+                     if(navigator.vibrate) navigator.vibrate([50, 50, 50]); // Rumble
 
                      // Check Drop
                      const drop = this.progression.checkDrop(null, e.difficulty);
@@ -2303,7 +2525,8 @@ class GameLoop {
                 }
                 this.camera.x += (Math.random()-0.5) * 10;
                 this.camera.y += (Math.random()-0.5) * 10;
-                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1);
+                // Spatial Audio
+                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1, mx, my, this.camera);
             }
             const dist = Math.hypot(head.x - e.points[0].x, head.y - e.points[0].y);
             if (dist > 3000) this.enemies.splice(i, 1);
@@ -2318,7 +2541,10 @@ class GameLoop {
                 this.creature.gameStats.dna += dnaValue;
                 this.creature.gameStats.mass += 0.5 * dnaValue;
                 this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
-                if(this.settings.audioEnabled) this.audio.playEat();
+
+                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera); // Spatial
+                if(navigator.vibrate) navigator.vibrate(20); // Light haptic
+
                 this.spawnParticles(f.x, f.y, f.color, 5, 100);
                 if (f.type !== 'meat') {
                      this.food.push({ x: head.x + (Math.random()-0.5)*1000, y: head.y + (Math.random()-0.5)*1000, radius: 5, color: '#0f0' });
@@ -2332,6 +2558,13 @@ class GameLoop {
         }
 
         this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
+
+        for (let i = this.debris.length - 1; i >= 0; i--) {
+            const d = this.debris[i];
+            d.update(dt, this.physics);
+            if (!d.active) this.debris.splice(i, 1);
+        }
+
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
@@ -2413,6 +2646,8 @@ class GameLoop {
         });
         this.ctx.globalCompositeOperation = 'source-over';
 
+        this.debris.forEach(d => d.render(this.ctx)); // Render debris under particles/enemies? Or maybe under food?
+
         this.particles.forEach(p => { this.ctx.globalAlpha = p.life * 2; this.ctx.fillStyle = p.color; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); this.ctx.fill(); });
         this.ctx.globalAlpha = 1.0;
 
@@ -2420,12 +2655,9 @@ class GameLoop {
 
         if (this.gameState === 'playing' || this.gameState === 'paused') {
             this.renderer.drawCreature(this.creature, this.headAngle);
-            const head = this.creature.points[0];
-            const scale = head.radius / head.baseRadius;
-            this.ctx.fillStyle = '#333';
-            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale, 5 * scale);
-            this.ctx.fillStyle = this.creature.gameStats.health < 20 ? '#f00' : '#0f0';
-            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale * (Math.max(0, this.creature.gameStats.health) / 100), 5 * scale);
+
+            // Diegetic UI: Removed Health Bar
+            // Health is now visualized via creature glow/color in Renderer
         }
 
         this.camera.restore(this.ctx);

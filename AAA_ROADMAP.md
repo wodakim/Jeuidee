@@ -10,15 +10,15 @@ Voici 10 axes d'amélioration technique et ludique pour pousser le jeu vers une 
 **Concept :** Remplacer les animations sinusoïdales (vagues) des tentacules et colonnes vertébrales par de la **Cinématique Inverse (IK)**. Les membres réagiraient physiquement à l'inertie, aux courants et aux collisions (se replier lors d'un impact, s'étendre pour attraper une proie).
 **Technique :** Algorithme FABRIK (Forward And Backward Reaching Inverse Kinematics) léger.
 
-## 3. Écosystème Réactif & Vivant (Boids)
+## 3. Écosystème Réactif & Vivant (Boids) [FAIT]
 **Concept :** Les ennemis ne devraient pas juste errer. Implémenter des comportements de groupe (bancs de poissons) qui fuient ou attaquent en coordination.
 **Technique :** Algorithme de Reynolds (Separation, Alignment, Cohesion). Ajouter des chaînes alimentaires : les gros mangent les moyens qui mangent les petits, indépendamment du joueur.
 
-## 4. Destruction Soft-Body Viscérale
+## 4. Destruction Soft-Body Viscérale [FAIT]
 **Concept :** Quand un ennemi meurt, il ne devrait pas juste "pop" en particules. Il devrait se déchirer ou se diviser organiquement.
 **Technique :** Utiliser la triangulation de Delaunay ou Voronoi pour découper le maillage physique de la créature en morceaux interactifs qui flottent et peuvent être mangés individuellement.
 
-## 5. Audio Spatial & Adaptatif (Wwise-lite)
+## 5. Audio Spatial & Adaptatif (Wwise-lite) [FAIT]
 **Concept :** Une immersion totale via le son.
 - **Spatialisation :** Le son change de volume et de "muffled" (filtre passe-bas) selon la distance et la direction.
 - **Musique Dynamique :** La nappe sonore s'intensifie (couches supplémentaires, tempo) selon le niveau de danger ou la taille de la créature.
@@ -31,7 +31,7 @@ Voici 10 axes d'amélioration technique et ludique pour pousser le jeu vers une 
 **Concept :** Permettre aux joueurs de rencontrer les créatures créées par d'autres joueurs.
 **Technique :** Générer un "Code ADN" (String Base64) de la créature. Les joueurs peuvent copier/coller ce code pour faire apparaître la créature d'un ami comme un "Boss" dans leur propre partie.
 
-## 8. Interface Diégétique & "Juice"
+## 8. Interface Diégétique & "Juice" [FAIT]
 **Concept :** Supprimer les barres de vie classiques. La santé est représentée par l'intensité de la bioluminescence ou l'intégrité de la membrane cellulaire.
 **UI 3D :** Utiliser des transformations CSS 3D pour que les menus semblent flotter dans l'eau (parallax souris/gyroscope).
 

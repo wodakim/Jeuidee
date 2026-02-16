@@ -10,13 +10,28 @@ export default class Renderer {
         if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
 
         const points = creature.points;
-        const color = creature.color || '#00ffff';
+        let color = creature.color || '#00ffff';
+
+        // Diegetic Health: Modulate color/intensity
+        const healthPct = creature.gameStats.health / creature.gameStats.maxHealth;
+
+        // Flash Red on Damage
+        if (creature.lastDamageTime && Date.now() - creature.lastDamageTime < 200) {
+            color = '#ff0000';
+        } else if (healthPct < 0.3) {
+            // Pulse Red when low
+            const pulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
+            color = pulse > 0.5 ? '#ff0000' : color;
+        }
 
         for (let i = points.length - 1; i >= 0; i--) {
             const p = points[i];
 
+            // Glow intensity based on health
+            const glowSize = 2.5 * (0.5 + 0.5 * healthPct);
+
             // Glow
-            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2.5);
+            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * glowSize);
             grad.addColorStop(0, color);
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
