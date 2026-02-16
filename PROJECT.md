@@ -56,7 +56,7 @@ To create a high-fidelity, offline-capable "Arcade Evolution Simulator" that cap
     *   [x] "Snap-to-Spine": Parts automatically orient to the spine's curvature.
     *   [ ] Mirroring: Automatically place symmetric parts.
 *   **3.3 Procedural Stats:**
-    *   [ ] Visual feedback for stats (Speed, Damage, Defense) based on attached parts.
+    *   [x] Visual feedback for stats (Speed, Damage, Defense) based on attached parts.
 
 ## CHAPTER 4: THE PREDATOR'S ECOSYSTEM (AI & GAMEPLAY)
 *Focus: Conflict, Growth, and Life*
@@ -67,12 +67,28 @@ To create a high-fidelity, offline-capable "Arcade Evolution Simulator" that cap
     *   [x] Refactor `Enemy` to use the same `Vertebra/SoftBody` system as the player (but simplified for performance).
     *   [x] Implement `Behavior Trees` or `State Machines` for AI (Idle, Wander, Flee, Chase, Mate).
 *   **4.2 Combat 2.0 (Visceral):**
-    *   [ ] "Hitstop": Freeze the game for 3-4 frames on impact to emphasize force.
-    *   [ ] "Recoil": Physics-based knockback when colliding with spikes/shields.
-    *   [ ] "Gore" (Family Friendly): Bursts of colorful particles/bubbles on damage.
+    *   [x] "Hitstop": Freeze the game for 3-4 frames on impact to emphasize force.
+    *   [x] "Recoil": Physics-based knockback when colliding with spikes/shields.
+    *   [x] "Gore" (Family Friendly): Bursts of colorful particles/bubbles on damage.
 *   **4.3 Growth Stages:**
-    *   [ ] Implement distinct visual scales: `Micro` (eat plankton), `Macro` (eat others), `Titan` (apex predator).
-    *   [ ] Dynamic spawning: The world populates with larger enemies as the player grows.
+    *   [x] Implement distinct visual scales: `Micro` (eat plankton), `Macro` (eat others), `Titan` (apex predator).
+    *   [x] Dynamic spawning: The world populates with larger enemies as the player grows.
+
+## CHAPTER 4.5: CRITIQUE & POLISH (CURRENT)
+*Focus: Addressing Feedback - Movement, Death, and UX*
+
+**Objective:** Fix critical flaws in game feel and flow.
+
+*   **4.5.1 Movement Tuning:**
+    *   [ ] Reduce drag/inertia for a "snappier" response.
+    *   [ ] Increase base speed and turning capability.
+*   **4.5.2 Death Logic:**
+    *   [ ] Implement proper "Game Over" state when health <= 0.
+    *   [ ] Prevent health regen bug.
+    *   [ ] Add Respawn functionality.
+*   **4.5.3 Main Menu:**
+    *   [ ] Create a Start Screen overlay.
+    *   [ ] Pause game loop (or run in background mode) until Start.
 
 ## CHAPTER 5: POLISH & JUICE (THE "FUN" FACTOR)
 *Focus: Feedback Loops and "Game Feel"*
