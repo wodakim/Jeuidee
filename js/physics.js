@@ -41,7 +41,7 @@ export default class Physics {
             p.vy = vy;
         }
 
-        const iterations = 5;
+        const iterations = 3; // Optimization: Reduced from 5
         for (let i = 0; i < iterations; i++) {
             for (let c of constraints) {
                 const dx = c.p2.x - c.p1.x;
