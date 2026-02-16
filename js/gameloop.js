@@ -5,6 +5,7 @@ import Editor from './editor.js';
 import Enemy from './enemy.js';
 import AudioSystem from './audio.js';
 import Stats from './stats.js';
+import Renderer from './renderer.js';
 
 class GameLoop {
     constructor() {
@@ -22,6 +23,7 @@ class GameLoop {
         this.physics = new Physics();
         this.camera = new Camera(window.innerWidth, window.innerHeight);
         this.audio = new AudioSystem();
+        this.renderer = new Renderer(this.ctx, this.camera);
 
         // --- JELLY CREATURE (Soft Body) ---
         this.creature = {
@@ -75,8 +77,21 @@ class GameLoop {
         `;
         document.body.appendChild(gameOver);
 
+        // HUD - Evolve Button
+        const hud = document.createElement('div');
+        hud.id = 'game-hud';
+        hud.style = `position:absolute; top:20px; right:20px; z-index:90; pointer-events:auto;`;
+        hud.innerHTML = `
+            <button id="evolve-btn" style="display:none; padding:10px 20px; background:linear-gradient(45deg, #f0f, #00f); border:none; border-radius:20px; font-family:Orbitron; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 10px #f0f;">EVOLVE (10 DNA)</button>
+        `;
+        document.body.appendChild(hud);
+
         document.getElementById('play-btn').onclick = () => this.startGame();
         document.getElementById('respawn-btn').onclick = () => this.respawn();
+        document.getElementById('evolve-btn').onclick = () => {
+            this.editor.toggle(true);
+            document.getElementById('evolve-btn').style.display = 'none';
+        };
     }
 
     init() {
@@ -310,6 +325,14 @@ class GameLoop {
             }
         }
 
+        // Check Evolution
+        if (this.creature.gameStats.dna >= 10 && !this.editor.active) {
+            const btn = document.getElementById('evolve-btn');
+            if (btn && btn.style.display === 'none') {
+                 btn.style.display = 'block';
+            }
+        }
+
         this.camera.update(head.x, head.y, head.vx, head.vy, dt);
 
         this.bgMid.forEach(p => {
@@ -399,41 +422,10 @@ class GameLoop {
         this.enemies.forEach(e => e.render(this.ctx));
 
         if (this.gameState === 'playing') {
-            const points = this.creature.points;
-            for (let i = points.length - 1; i >= 0; i--) {
-                const p = points[i];
-                const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2);
-                grad.addColorStop(0, '#aaffff');
-                grad.addColorStop(1, 'rgba(0, 255, 255, 0)');
-                this.ctx.fillStyle = grad;
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2);
-                this.ctx.fill();
-                this.ctx.fillStyle = '#00ffff';
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, p.radius * 0.8, 0, Math.PI * 2);
-                this.ctx.fill();
-            }
+            this.renderer.drawCreature(this.creature, this.headAngle);
 
-            const head = points[0];
+            const head = this.creature.points[0];
             const scale = head.radius / head.baseRadius;
-
-            this.ctx.save();
-            this.ctx.translate(head.x, head.y);
-            this.ctx.rotate(this.headAngle);
-            this.ctx.scale(scale, scale);
-
-            this.ctx.fillStyle = 'white';
-            this.ctx.beginPath();
-            this.ctx.arc(10, -8, 6, 0, Math.PI*2);
-            this.ctx.arc(10, 8, 6, 0, Math.PI*2);
-            this.ctx.fill();
-            this.ctx.fillStyle = 'black';
-            this.ctx.beginPath();
-            this.ctx.arc(13, -8, 3, 0, Math.PI*2);
-            this.ctx.arc(13, 8, 3, 0, Math.PI*2);
-            this.ctx.fill();
-            this.ctx.restore();
 
             // Health Bar
             this.ctx.fillStyle = '#333';
