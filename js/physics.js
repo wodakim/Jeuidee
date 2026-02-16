@@ -1,7 +1,7 @@
 export default class Physics {
     constructor() {
         this.gravity = 0;
-        this.friction = 0.90; // Decreased friction from 0.92 for more "glide"
+        this.friction = 0.97; // Decreased friction from 0.92 for more "glide"
         this.elasticity = 0.5;
     }
 

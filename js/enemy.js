@@ -1,15 +1,14 @@
 import Stats from './stats.js';
 
 export default class Enemy {
-    constructor(x, y, difficulty, physics, type = 'hunter') {
+    constructor(x, y, difficulty, physics) {
         this.physics = physics;
         this.active = true;
         this.difficulty = difficulty; // 1 to 10+
-        this.type = type; // 'hunter', 'grazer', 'titan'
 
         // Procedural Generation
         this.scale = 1 + (difficulty * 0.2); // Growth
-        this.color = type === 'grazer' ? `hsl(${100 + Math.random() * 50}, 70%, 50%)` : `hsl(${Math.random() * 360}, 70%, 50%)`;
+        this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
 
         // Body
         this.points = [];
@@ -23,9 +22,9 @@ export default class Enemy {
         this.stats.calculate(this.parts);
 
         // Base stats scaling
-        this.stats.speed = (300 + difficulty * 50) * (type === 'grazer' ? 0.8 : 1.0);
+        this.stats.speed = 300 + difficulty * 50;
         this.stats.damage = 5 + difficulty * 2;
-        this.health = (20 + difficulty * 10) * (type === 'titan' ? 5 : 1);
+        this.health = 20 + difficulty * 10;
         this.maxHealth = this.health;
 
         // AI State
@@ -33,14 +32,11 @@ export default class Enemy {
         this.targetX = x;
         this.targetY = y;
         this.stateTimer = 0;
-
-        // Flocking
-        this.flockId = -1;
     }
 
     createBody(x, y) {
-        const segs = this.type === 'titan' ? 10 : (3 + Math.floor(this.difficulty / 3));
-        const rad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
+        const segs = 3 + Math.floor(this.difficulty / 3);
+        const rad = 15 * this.scale;
 
         for (let i = 0; i < segs; i++) {
             const p = this.physics.constructor.createPoint(x, y + i * rad, rad * (1 - i*0.1), 1 + this.difficulty * 0.5);
@@ -55,13 +51,6 @@ export default class Enemy {
     }
 
     generateParts() {
-        if (this.type === 'grazer') {
-            // Grazers have fins mostly
-            this.parts.push({ type: 'Fin', boneIndex: 1, side: 1 });
-            this.parts.push({ type: 'Fin', boneIndex: 1, side: -1 });
-            return;
-        }
-
         const partCount = Math.floor(this.difficulty);
 
         for(let i=0; i<partCount; i++) {
@@ -85,11 +74,11 @@ export default class Enemy {
         // Steering
         let head = this.points[0];
         let dx = 0, dy = 0;
+        const distToPlayer = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
 
-        // Boids Logic overrides standard steering if in a flock and type is grazer
-        // This is handled by BoidManager, but we need to respect the result.
-        // Actually, let's allow BoidManager to modify position/velocity directly,
-        // and here we add the "Goal" steering (Chase/Flee/Wander).
+        // Logic: if difficulty > player (proxy by scale?), chase.
+        // We don't know player stats here easily, so use distance or random behavior.
+        // Let's assume if dist < 400 * scale, react.
 
         if (this.state === 'chase') {
             dx = playerHead.x - head.x;
@@ -106,11 +95,8 @@ export default class Enemy {
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
             const force = this.stats.speed * dt * dt; // Apply as impulse
-            // If grazer, reduce individual steering influence to let flocking work better
-            const weight = this.type === 'grazer' ? 0.3 : 1.0;
-
-            head.x += (dx / dist) * force * weight;
-            head.y += (dy / dist) * force * weight;
+            head.x += (dx / dist) * force;
+            head.y += (dy / dist) * force;
         }
 
         // Physics
@@ -121,11 +107,9 @@ export default class Enemy {
         this.stateTimer = Math.random() * 3 + 1;
 
         const dist = Math.hypot(playerHead.x - this.points[0].x, playerHead.y - this.points[0].y);
-        const aggroRange = this.type === 'grazer' ? 200 : 400 * this.scale;
-
-        if (dist < aggroRange) {
+        if (dist < 400 * this.scale) {
              // Aggressive if difficulty is high
-             if (this.type !== 'grazer' && this.difficulty > 3) this.state = 'chase';
+             if (this.difficulty > 3) this.state = 'chase';
              else this.state = 'flee';
         } else {
             this.state = 'wander';

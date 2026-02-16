@@ -258,114 +258,37 @@ h1 {
 class AudioSystem {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.value = 0.5;
-        this.masterGain.connect(this.ctx.destination);
-
-        // Reverb / Echo
-        this.delay = this.ctx.createDelay();
-        this.delay.delayTime.value = 0.3; // 300ms echo
-        this.delayFeedback = this.ctx.createGain();
-        this.delayFeedback.gain.value = 0.4;
-        this.delayFilter = this.ctx.createBiquadFilter();
-        this.delayFilter.type = 'lowpass';
-        this.delayFilter.frequency.value = 1000; // Dampen echo
-
-        // Routing: Input -> Delay -> Feedback -> Input
-        this.delay.connect(this.delayFeedback);
-        this.delayFeedback.connect(this.delayFilter);
-        this.delayFilter.connect(this.delay);
-
-        // Connect Delay to Master (Wet Mix)
-        this.delay.connect(this.masterGain);
-
-        // Ambience
-        this.droneOsc = null;
-        this.startDrone();
+        this.masterVolume = 0.5;
     }
 
-    startDrone() {
-        // Deep Sea Drone (Low sine + modulation)
-        const osc = this.ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.value = 50;
+    playTone(freq, type, duration) {
+        if (this.ctx.state === 'suspended') this.ctx.resume();
 
-        const mod = this.ctx.createOscillator();
-        mod.type = 'sine';
-        mod.frequency.value = 0.1; // Slow throb
-
-        const modGain = this.ctx.createGain();
-        modGain.gain.value = 10;
-
-        mod.connect(modGain);
-        modGain.connect(osc.frequency);
-
-        const gain = this.ctx.createGain();
-        gain.gain.value = 0.1; // Quiet
-
-        osc.connect(gain);
-        gain.connect(this.masterGain); // Direct to master, no reverb for clean bass
-
-        osc.start();
-        mod.start();
-
-        this.droneOsc = { osc, mod, gain };
-    }
-
-    playTone(freq, type, duration, x = 0, y = 0, camera = null) {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        const panner = this.ctx.createStereoPanner();
-
-        // Spatial Audio Logic
-        if (camera) {
-            // Screen width is roughly camera.viewportWidth / camera.zoom
-            // Let's approximate. Center is camera.x, camera.y
-            const relX = (x - camera.x);
-            // Normalize roughly. View width varies.
-            // Let's assume view width ~1000 world units at zoom 1
-            const pan = Math.max(-1, Math.min(1, relX / (500 / camera.zoom)));
-            panner.pan.value = pan;
-        }
 
         osc.type = type;
-        osc.frequency.value = freq;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+
+        gain.gain.setValueAtTime(this.masterVolume, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
 
         osc.connect(gain);
-        gain.connect(panner);
-        panner.connect(this.masterGain);
-        panner.connect(this.delay); // Send to reverb
-
-        const now = this.ctx.currentTime;
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
-
-        osc.start(now);
-        osc.stop(now + duration);
-    }
-
-    playEat(x, y, camera) {
-        this.playTone(300 + Math.random() * 200, 'triangle', 0.1, x, y, camera);
-        this.playTone(500 + Math.random() * 200, 'sine', 0.15, x, y, camera);
-    }
-
-    playDash() {
-        // White noise burst for dash?
-        // Simple sweep
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(100, this.ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.3);
-
-        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
-
-        osc.connect(gain);
-        gain.connect(this.masterGain);
+        gain.connect(this.ctx.destination);
 
         osc.start();
-        osc.stop(this.ctx.currentTime + 0.3);
+        osc.stop(this.ctx.currentTime + duration);
+    }
+
+    playEat() {
+        this.playTone(400 + Math.random()*200, 'sine', 0.1);
+    }
+
+    playSwim() {
+        // Low bubbling noise?
+        // Hard with basic osc, maybe filtered noise.
+        // For now, simple low blip
+        // this.playTone(100, 'triangle', 0.2);
     }
 }
 
@@ -498,39 +421,27 @@ class Stats {
         parts.forEach(part => {
             switch(part.type) {
                 case 'Fin':
-                    speedMod += 200;
+                    speedMod += 200; // Force units
                     turnMod += 1;
                     break;
                 case 'Spike':
                     damageMod += 10;
-                    defenseMod += 2;
+                    defenseMod += 2; // Spikes hurt attacker
                     break;
                 case 'Eye':
-                    // Enhanced vision (could affect zoom or food detection range)
+                    // Zoom out view? Or just cosmetic for now?
+                    // Maybe 'Critical Hit Chance'
                     break;
                 case 'Poison':
-                    damageMod += 5; // Passive DoT
-                    defenseMod += 1; // Deterrent
-                    break;
-                case 'Tentacle':
-                    turnMod += 2; // Better maneuvering
-                    damageMod += 2; // Slight damage
-                    break;
-                case 'Shield':
-                    defenseMod += 15;
-                    speedMod -= 50; // Heavy
-                    break;
-                case 'Booster':
-                    speedMod += 400;
-                    turnMod -= 0.5; // Harder to steer
+                    damageMod += 5; // DoT logic later
                     break;
             }
         });
 
-        this.speed = Math.max(100, this.baseSpeed + speedMod);
+        this.speed = this.baseSpeed + speedMod;
         this.damage = this.baseDamage + damageMod;
         this.defense = this.baseDefense + defenseMod;
-        this.turnSpeed = Math.max(1, this.baseTurnSpeed + turnMod);
+        this.turnSpeed = this.baseTurnSpeed + turnMod;
     }
 }
 
@@ -658,87 +569,6 @@ class Settings {
 }
 
 
-// --- js/assets.js ---
-class AssetGenerator {
-    constructor() {
-        this.cache = {};
-    }
-
-    get(key) {
-        if (!this.cache[key]) {
-            this.cache[key] = this.generate(key);
-        }
-        return this.cache[key];
-    }
-
-    generate(key) {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-
-        if (key === 'giant_worm') {
-            canvas.width = 500;
-            canvas.height = 200;
-            // Draw a segmented worm silhouette
-            ctx.fillStyle = 'rgba(20, 40, 60, 0.4)';
-            ctx.filter = 'blur(10px)'; // Blur once during generation
-
-            for (let i = 0; i < 10; i++) {
-                ctx.beginPath();
-                ctx.arc(50 + i * 40, 100, 40 - i * 2, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-        else if (key === 'giant_jelly') {
-            canvas.width = 400;
-            canvas.height = 600;
-            ctx.fillStyle = 'rgba(30, 50, 70, 0.3)';
-            ctx.filter = 'blur(15px)';
-
-            // Head
-            ctx.beginPath();
-            ctx.arc(200, 150, 100, Math.PI, 0);
-            ctx.fill();
-
-            // Tentacles
-            ctx.lineWidth = 20;
-            ctx.strokeStyle = 'rgba(30, 50, 70, 0.2)';
-            for(let i=0; i<5; i++) {
-                ctx.beginPath();
-                ctx.moveTo(120 + i*40, 150);
-                ctx.quadraticCurveTo(120 + i*40 + (Math.random()-0.5)*50, 400, 120 + i*40, 550);
-                ctx.stroke();
-            }
-        }
-        else if (key === 'god_rays') {
-            canvas.width = 800;
-            canvas.height = 800;
-
-            // Radial Gradient Rays
-            const grad = ctx.createRadialGradient(400, 400, 0, 400, 400, 400);
-            grad.addColorStop(0, 'rgba(0, 255, 255, 0.05)');
-            grad.addColorStop(0.5, 'rgba(0, 200, 255, 0.02)');
-            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-            ctx.fillStyle = grad;
-            // Draw Star/Ray shape
-            for(let i=0; i<8; i++) {
-                ctx.save();
-                ctx.translate(400, 400);
-                ctx.rotate(i * (Math.PI / 4));
-                ctx.beginPath();
-                ctx.moveTo(0, 0);
-                ctx.lineTo(100, -400);
-                ctx.lineTo(-100, -400);
-                ctx.fill();
-                ctx.restore();
-            }
-        }
-
-        return canvas;
-    }
-}
-
-
 // --- js/renderer.js ---
 class Renderer {
     constructor(ctx, camera, settings) {
@@ -752,28 +582,13 @@ class Renderer {
         if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
 
         const points = creature.points;
-        let color = creature.color || '#00ffff';
-
-        // Diegetic Health: Modulate color/intensity
-        const healthPct = creature.gameStats.health / creature.gameStats.maxHealth;
-
-        // Flash Red on Damage
-        if (creature.lastDamageTime && Date.now() - creature.lastDamageTime < 200) {
-            color = '#ff0000';
-        } else if (healthPct < 0.3) {
-            // Pulse Red when low
-            const pulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
-            color = pulse > 0.5 ? '#ff0000' : color;
-        }
+        const color = creature.color || '#00ffff';
 
         for (let i = points.length - 1; i >= 0; i--) {
             const p = points[i];
 
-            // Glow intensity based on health
-            const glowSize = 2.5 * (0.5 + 0.5 * healthPct);
-
             // Glow
-            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * glowSize);
+            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2.5);
             grad.addColorStop(0, color);
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
@@ -866,90 +681,7 @@ class Renderer {
             this.ctx.fill();
             this.ctx.shadowBlur = 0;
         } else if (type === 'Eye') {
-            this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
-            this.ctx.fillStyle = 'white';
-            this.ctx.beginPath();
-            this.ctx.arc(12, 0, 6, 0, Math.PI*2);
-            this.ctx.fill();
-            this.ctx.fillStyle = 'black';
-            this.ctx.beginPath();
-            this.ctx.arc(14, 0, 2, 0, Math.PI*2); // Pupil
-            this.ctx.fill();
-        } else if (type === 'Tentacle') {
-            this.ctx.strokeStyle = '#a0f';
-            this.ctx.lineWidth = 4;
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = '#a0f';
-                this.ctx.shadowBlur = 10;
-            }
-
-            // AAA Proc-Gen Tentacle (Sine Wave Chain)
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, 0);
-
-            const t = Date.now() * 0.005;
-            // Simulate 4 segments trailing
-            let px = 0, py = 0;
-            for(let i=1; i<=5; i++) {
-                // Wave function based on time and segment index
-                // Adds a "whipping" motion
-                const wave = Math.sin(t + i * 0.5) * (i * 3);
-                const nx = i * 10;
-                const ny = wave;
-
-                this.ctx.lineTo(nx, ny);
-                px = nx; py = ny;
-            }
-            this.ctx.stroke();
-
-            // Bulb at end
-            this.ctx.fillStyle = '#d0f';
-            this.ctx.beginPath();
-            this.ctx.arc(px, py, 3, 0, Math.PI*2);
-            this.ctx.fill();
-
-            this.ctx.shadowBlur = 0;
-        } else if (type === 'Shield') {
-            this.ctx.fillStyle = '#444';
-            this.ctx.strokeStyle = '#888';
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            this.ctx.arc(0, 0, 20, -Math.PI/2, Math.PI/2);
-            this.ctx.lineTo(0, 0);
-            this.ctx.fill();
-            this.ctx.stroke();
-        } else if (type === 'Booster') {
-            this.ctx.fillStyle = '#555';
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, -5);
-            this.ctx.lineTo(15, -8);
-            this.ctx.lineTo(15, 8);
-            this.ctx.lineTo(0, 5);
-            this.ctx.fill();
-            // Flame
-            if (Math.random() > 0.5) {
-                this.ctx.fillStyle = '#fa0';
-                this.ctx.beginPath();
-                this.ctx.moveTo(15, -5);
-                this.ctx.lineTo(25 + Math.random()*10, 0);
-                this.ctx.lineTo(15, 5);
-                this.ctx.fill();
-            }
-        } else if (type === 'Poison') {
-            this.ctx.fillStyle = '#0f0';
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = '#0f0';
-                this.ctx.shadowBlur = 15;
-            }
-            this.ctx.beginPath();
-            this.ctx.arc(10, 0, 8, 0, Math.PI*2);
-            this.ctx.fill();
-            this.ctx.shadowBlur = 0;
-            // Bubbles
-            this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            this.ctx.beginPath();
-            this.ctx.arc(12 - Math.random()*4, -2 + Math.random()*4, 2, 0, Math.PI*2);
-            this.ctx.fill();
+             // Eyes drawn in main loop
         }
 
         this.ctx.restore();
@@ -1138,10 +870,6 @@ class Input {
         this.angle = 0;
         this.distance = 0;
         this.maxDistance = 50;
-
-        this.lastTap = 0;
-        this.doubleTapDetected = false;
-
         this.setupListeners();
     }
 
@@ -1174,12 +902,6 @@ class Input {
         this.currX = x;
         this.currY = y;
         this.distance = 0;
-
-        const now = Date.now();
-        if (now - this.lastTap < 300) {
-            this.doubleTapDetected = true;
-        }
-        this.lastTap = now;
     }
 
     handleMove(x, y) {
@@ -1205,14 +927,6 @@ class Input {
             y: Math.sin(this.angle) * force
         };
     }
-
-    checkDoubleTap() {
-        if (this.doubleTapDetected) {
-            this.doubleTapDetected = false;
-            return true;
-        }
-        return false;
-    }
 }
 
 
@@ -1220,15 +934,14 @@ class Input {
 
 
 class Enemy {
-    constructor(x, y, difficulty, physics, type = 'hunter') {
+    constructor(x, y, difficulty, physics) {
         this.physics = physics;
         this.active = true;
         this.difficulty = difficulty; // 1 to 10+
-        this.type = type; // 'hunter', 'grazer', 'titan'
 
         // Procedural Generation
         this.scale = 1 + (difficulty * 0.2); // Growth
-        this.color = type === 'grazer' ? `hsl(${100 + Math.random() * 50}, 70%, 50%)` : `hsl(${Math.random() * 360}, 70%, 50%)`;
+        this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
 
         // Body
         this.points = [];
@@ -1242,9 +955,9 @@ class Enemy {
         this.stats.calculate(this.parts);
 
         // Base stats scaling
-        this.stats.speed = (300 + difficulty * 50) * (type === 'grazer' ? 0.8 : 1.0);
+        this.stats.speed = 300 + difficulty * 50;
         this.stats.damage = 5 + difficulty * 2;
-        this.health = (20 + difficulty * 10) * (type === 'titan' ? 5 : 1);
+        this.health = 20 + difficulty * 10;
         this.maxHealth = this.health;
 
         // AI State
@@ -1252,14 +965,11 @@ class Enemy {
         this.targetX = x;
         this.targetY = y;
         this.stateTimer = 0;
-
-        // Flocking
-        this.flockId = -1;
     }
 
     createBody(x, y) {
-        const segs = this.type === 'titan' ? 10 : (3 + Math.floor(this.difficulty / 3));
-        const rad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
+        const segs = 3 + Math.floor(this.difficulty / 3);
+        const rad = 15 * this.scale;
 
         for (let i = 0; i < segs; i++) {
             const p = this.physics.constructor.createPoint(x, y + i * rad, rad * (1 - i*0.1), 1 + this.difficulty * 0.5);
@@ -1274,13 +984,6 @@ class Enemy {
     }
 
     generateParts() {
-        if (this.type === 'grazer') {
-            // Grazers have fins mostly
-            this.parts.push({ type: 'Fin', boneIndex: 1, side: 1 });
-            this.parts.push({ type: 'Fin', boneIndex: 1, side: -1 });
-            return;
-        }
-
         const partCount = Math.floor(this.difficulty);
 
         for(let i=0; i<partCount; i++) {
@@ -1304,11 +1007,11 @@ class Enemy {
         // Steering
         let head = this.points[0];
         let dx = 0, dy = 0;
+        const distToPlayer = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
 
-        // Boids Logic overrides standard steering if in a flock and type is grazer
-        // This is handled by BoidManager, but we need to respect the result.
-        // Actually, let's allow BoidManager to modify position/velocity directly,
-        // and here we add the "Goal" steering (Chase/Flee/Wander).
+        // Logic: if difficulty > player (proxy by scale?), chase.
+        // We don't know player stats here easily, so use distance or random behavior.
+        // Let's assume if dist < 400 * scale, react.
 
         if (this.state === 'chase') {
             dx = playerHead.x - head.x;
@@ -1325,11 +1028,8 @@ class Enemy {
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
             const force = this.stats.speed * dt * dt; // Apply as impulse
-            // If grazer, reduce individual steering influence to let flocking work better
-            const weight = this.type === 'grazer' ? 0.3 : 1.0;
-
-            head.x += (dx / dist) * force * weight;
-            head.y += (dy / dist) * force * weight;
+            head.x += (dx / dist) * force;
+            head.y += (dy / dist) * force;
         }
 
         // Physics
@@ -1340,11 +1040,9 @@ class Enemy {
         this.stateTimer = Math.random() * 3 + 1;
 
         const dist = Math.hypot(playerHead.x - this.points[0].x, playerHead.y - this.points[0].y);
-        const aggroRange = this.type === 'grazer' ? 200 : 400 * this.scale;
-
-        if (dist < aggroRange) {
+        if (dist < 400 * this.scale) {
              // Aggressive if difficulty is high
-             if (this.type !== 'grazer' && this.difficulty > 3) this.state = 'chase';
+             if (this.difficulty > 3) this.state = 'chase';
              else this.state = 'flee';
         } else {
             this.state = 'wander';
@@ -1407,158 +1105,6 @@ class Enemy {
                  ctx.fill();
              }
              ctx.restore();
-        });
-
-        ctx.restore();
-    }
-}
-
-
-// --- js/boids.js ---
-
-
-class BoidManager {
-    constructor(physics) {
-        this.physics = physics;
-        this.flocks = [];
-    }
-
-    createFlock(x, y, count, difficulty, type = 'grazer') {
-        const flock = [];
-        const flockId = Math.floor(Math.random() * 10000);
-        for (let i = 0; i < count; i++) {
-            // Spawn close to center
-            const ex = x + (Math.random() - 0.5) * 200;
-            const ey = y + (Math.random() - 0.5) * 200;
-            const enemy = new Enemy(ex, ey, difficulty, this.physics, type);
-            enemy.flockId = flockId;
-            flock.push(enemy);
-        }
-        this.flocks.push(flock);
-        return flock;
-    }
-
-    update(dt, enemies) {
-        const separationDist = 80;
-        const cohesionDist = 200;
-
-        enemies.forEach(e => {
-            if (e.type !== 'grazer') return;
-
-            let sepX = 0, sepY = 0;
-            let cohX = 0, cohY = 0;
-            let count = 0;
-
-            const head = e.points[0];
-
-            enemies.forEach(other => {
-                if (e === other || other.type !== 'grazer') return;
-                // Only flock with same flockId? Or all grazers? Let's say all grazers for now, or use flockId if we want distinct groups.
-                // Using flockId makes them stay in their spawn groups.
-                if (e.flockId !== other.flockId) return;
-
-                const otherHead = other.points[0];
-                const dist = Math.hypot(head.x - otherHead.x, head.y - otherHead.y);
-
-                if (dist < cohesionDist) {
-                    // Separation
-                    if (dist < separationDist && dist > 0) {
-                        sepX += (head.x - otherHead.x) / dist; // Push away
-                        sepY += (head.y - otherHead.y) / dist;
-                    }
-
-                    // Cohesion
-                    cohX += otherHead.x;
-                    cohY += otherHead.y;
-
-                    count++;
-                }
-            });
-
-            if (count > 0) {
-                // Apply forces (Soft Body impulse)
-                const sepForce = 8000; // Strong separation
-                head.x += sepX * sepForce * dt * dt;
-                head.y += sepY * sepForce * dt * dt;
-
-                // Cohesion
-                cohX /= count;
-                cohY /= count;
-                const cohDirX = cohX - head.x;
-                const cohDirY = cohY - head.y;
-                const cohForce = 200;
-
-                head.x += cohDirX * cohForce * dt * dt;
-                head.y += cohDirY * cohForce * dt * dt;
-            }
-        });
-    }
-}
-
-
-// --- js/debris.js ---
-class Debris {
-    constructor(points, constraints, color, life = 5) {
-        this.points = points;
-        this.constraints = constraints;
-        this.color = color;
-        this.life = life;
-        this.active = true;
-
-        // Tearing: Remove random constraints to simulate destruction
-        if (this.constraints.length > 2) {
-            const removeCount = Math.ceil(this.constraints.length * 0.4);
-            for(let i=0; i<removeCount; i++) {
-                const idx = Math.floor(Math.random() * this.constraints.length);
-                this.constraints.splice(idx, 1);
-            }
-        }
-
-        // Explosion Impulse
-        const center = this.getCenter();
-        this.points.forEach(p => {
-             const dx = p.x - center.x;
-             const dy = p.y - center.y;
-             const dist = Math.hypot(dx, dy) || 1;
-             const force = 100 * Math.random();
-             p.oldx -= (dx/dist) * force * 0.016; // Impulse
-             p.oldy -= (dy/dist) * force * 0.016;
-        });
-    }
-
-    getCenter() {
-        let x=0, y=0;
-        this.points.forEach(p => { x+=p.x; y+=p.y; });
-        return { x: x/this.points.length, y: y/this.points.length };
-    }
-
-    update(dt, physics) {
-        physics.update(this.points, this.constraints, dt);
-        this.life -= dt;
-        if (this.life <= 0) this.active = false;
-
-        // Fade out shrinking
-        if (this.life < 2) {
-             this.constraints.forEach(c => c.length *= 0.99);
-             this.points.forEach(p => p.radius *= 0.99);
-        }
-    }
-
-    render(ctx) {
-        if (!this.active) return;
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, this.life * 0.5); // Start semi-transparent
-
-        // Render blobs around constraints
-        ctx.strokeStyle = this.color;
-        ctx.lineCap = 'round';
-
-        this.constraints.forEach(c => {
-            ctx.lineWidth = (c.p1.radius + c.p2.radius) * 0.8;
-            ctx.beginPath();
-            ctx.moveTo(c.p1.x, c.p1.y);
-            ctx.lineTo(c.p2.x, c.p2.y);
-            ctx.stroke();
         });
 
         ctx.restore();
@@ -2015,9 +1561,6 @@ class Editor {
 
 
 
-
-
-
 class GameLoop {
     constructor() {
         this.running = false;
@@ -2049,21 +1592,17 @@ class GameLoop {
 
         this.saveManager = new SaveManager(this);
         this.progression = new Progression(this.saveManager);
-        this.assets = new AssetGenerator();
-        this.boidManager = new BoidManager(this.physics);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
         // Ecosystem
-        this.bgAbyssal = [];
-        this.bgRays = { angle: 0 };
+        this.bgAbyssal = []; // REMOVED GIANTS
         this.bgDeep = [];
         this.bgMid = [];
         this.bgFore = [];
 
         this.enemies = [];
         this.food = [];
-        this.debris = [];
         this.particles = [];
         this.hitstop = 0;
         this.gameState = 'menu'; // menu, playing, gameover, paused
@@ -2200,9 +1739,6 @@ class GameLoop {
     triggerUnlock(partKey) {
         if (this.progression.unlock(partKey)) {
             this.pauseGame(true); // True = Unlock Mode
-            // Haptic Pattern
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
-
             const overlay = document.getElementById('unlock-overlay');
             const part = PARTS_DB[partKey];
             overlay.innerHTML = `
@@ -2353,45 +1889,26 @@ class GameLoop {
     }
 
     spawnEnemies() {
-        const targetCount = 12; // Increased for flocks
+        const targetCount = 6;
         if (this.enemies.length >= targetCount) return;
-
+        const count = targetCount - this.enemies.length;
         const playerScale = Math.sqrt(this.creature.gameStats.mass / 10);
         const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
         const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
-
-        const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 1000 + Math.random() * 500;
-        const ex = playerX + Math.cos(angle) * dist;
-        const ey = playerY + Math.sin(angle) * dist;
-
-        if (Math.random() < 0.4) {
-            // Spawn Flock (Grazers)
-            const flockSize = 3 + Math.floor(Math.random() * 4);
-            const flock = this.boidManager.createFlock(ex, ey, flockSize, difficulty, 'grazer');
-            this.enemies.push(...flock);
-        } else {
-            // Spawn Hunter (Solo)
-            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
+        for(let i=0; i<count; i++) {
+            const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 1000 + Math.random() * 1000;
+            const ex = playerX + Math.cos(angle) * dist;
+            const ey = playerY + Math.sin(angle) * dist;
+            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics));
         }
     }
 
     initBackground() {
         this.bgAbyssal = []; this.bgDeep = []; this.bgMid = []; this.bgFore = [];
 
-        // AAA Optimization: Use Pre-rendered Sprites
-        for(let i=0; i<6; i++) {
-            this.bgAbyssal.push({
-                type: i % 2 === 0 ? 'giant_worm' : 'giant_jelly',
-                x: (Math.random() - 0.5) * 8000,
-                y: (Math.random() - 0.5) * 8000,
-                vx: (Math.random() - 0.5) * 10,
-                vy: (Math.random() - 0.5) * 5,
-                scale: 2 + Math.random() * 2,
-                angle: Math.random() * Math.PI * 2
-            });
-        }
+        // Removed Giants loop for performance
 
         for(let i=0; i<100; i++) this.bgDeep.push({ x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 6000, r: Math.random() * 4 + 2, alpha: Math.random() * 0.2 });
         for(let i=0; i<200; i++) this.bgMid.push({ x: (Math.random() - 0.5) * 4000, y: (Math.random() - 0.5) * 4000, r: Math.random() * 3, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, alpha: Math.random() * 0.3 });
@@ -2430,8 +1947,7 @@ class GameLoop {
     }
 
     updateBackgroundOnly(dt) {
-        this.bgRays.angle += dt * 0.05;
-        this.bgAbyssal.forEach(g => { g.x += g.vx * dt; g.y += g.vy * dt; g.angle += dt * 0.01; });
+        this.bgDeep.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; }); // Actually deep has no velocity?
         this.bgMid.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
         this.bgFore.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
     }
@@ -2470,25 +1986,9 @@ class GameLoop {
             this.headAngle += diff * turnSpeed * dt;
         }
 
-        // Dash Ability (Double Tap)
-        if (this.input.checkDoubleTap()) {
-            // Check if unlocked
-            if (this.progression.isUnlocked('Booster')) {
-                // Apply impulse
-                const dashForce = 5000 * scale;
-                head.x += Math.cos(this.headAngle) * dashForce * dt;
-                head.y += Math.sin(this.headAngle) * dashForce * dt;
-
-                this.spawnParticles(head.x, head.y, '#fff', 20, 300);
-                if(this.settings.audioEnabled) this.audio.playDash();
-                if(navigator.vibrate) navigator.vibrate(50); // Short haptic
-            }
-        }
-
         this.physics.update(this.creature.points, this.creature.constraints, dt);
         this.updateBackgroundOnly(dt);
         this.spawnEnemies();
-        this.boidManager.update(dt, this.enemies);
 
         const playerRadius = head.radius;
         for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -2502,19 +2002,10 @@ class GameLoop {
                 const mx = (head.x + e.points[0].x) / 2;
                 const my = (head.y + e.points[0].y) / 2;
                 this.hitstop = 0.05;
-                this.creature.lastDamageTime = Date.now(); // For red flash
-                if(navigator.vibrate) navigator.vibrate(200); // Heavy haptic impact
-
                 this.spawnParticles(mx, my, '#ff0044', 5, 200);
                 if (e.health <= 0) {
-                     this.spawnParticles(mx, my, '#ffaa00', 10, 400);
+                     this.spawnParticles(mx, my, '#ffaa00', 20, 400);
                      this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
-
-                     // Spawn Debris
-                     // Detach points/constraints from enemy instance effectively by passing them to Debris
-                     this.debris.push(new Debris(e.points, e.constraints, e.color, 4));
-
-                     if(navigator.vibrate) navigator.vibrate([50, 50, 50]); // Rumble
 
                      // Check Drop
                      const drop = this.progression.checkDrop(null, e.difficulty);
@@ -2525,8 +2016,7 @@ class GameLoop {
                 }
                 this.camera.x += (Math.random()-0.5) * 10;
                 this.camera.y += (Math.random()-0.5) * 10;
-                // Spatial Audio
-                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1, mx, my, this.camera);
+                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1);
             }
             const dist = Math.hypot(head.x - e.points[0].x, head.y - e.points[0].y);
             if (dist > 3000) this.enemies.splice(i, 1);
@@ -2541,10 +2031,7 @@ class GameLoop {
                 this.creature.gameStats.dna += dnaValue;
                 this.creature.gameStats.mass += 0.5 * dnaValue;
                 this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
-
-                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera); // Spatial
-                if(navigator.vibrate) navigator.vibrate(20); // Light haptic
-
+                if(this.settings.audioEnabled) this.audio.playEat();
                 this.spawnParticles(f.x, f.y, f.color, 5, 100);
                 if (f.type !== 'meat') {
                      this.food.push({ x: head.x + (Math.random()-0.5)*1000, y: head.y + (Math.random()-0.5)*1000, radius: 5, color: '#0f0' });
@@ -2558,13 +2045,6 @@ class GameLoop {
         }
 
         this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
-
-        for (let i = this.debris.length - 1; i >= 0; i--) {
-            const d = this.debris[i];
-            d.update(dt, this.physics);
-            if (!d.active) this.debris.splice(i, 1);
-        }
-
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
@@ -2588,36 +2068,9 @@ class GameLoop {
         bgGrad.addColorStop(0, '#000510'); bgGrad.addColorStop(1, '#001020');
         this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
 
-        // --- LAYER 0: GOD RAYS (Parallax 0.0) ---
-        if (this.settings.fxEnabled) {
-            const rays = this.assets.get('god_rays');
-            this.ctx.save();
-            this.ctx.translate(this.width/2, this.height/2);
-            this.ctx.rotate(this.bgRays.angle);
-            this.ctx.scale(3, 3);
-            this.ctx.translate(-400, -400); // Center image
-            this.ctx.drawImage(rays, 0, 0);
-            this.ctx.restore();
-        }
+        // --- LAYER 0: ABYSSAL GIANTS (REMOVED) ---
+        // Optimization: Giant layer completely removed per request
 
-        // --- LAYER 1: ABYSSAL GIANTS (Parallax 0.05) ---
-        this.ctx.save();
-        this.ctx.translate(this.width/2, this.height/2);
-        this.ctx.scale(this.camera.zoom, this.camera.zoom);
-        this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
-
-        this.bgAbyssal.forEach(g => {
-            const sprite = this.assets.get(g.type);
-            this.ctx.save();
-            this.ctx.translate(g.x, g.y);
-            this.ctx.rotate(g.angle);
-            this.ctx.scale(g.scale, g.scale);
-            this.ctx.drawImage(sprite, -sprite.width/2, -sprite.height/2);
-            this.ctx.restore();
-        });
-        this.ctx.restore();
-
-        // --- LAYER 2: DEEP PARTICLES (Parallax 0.1) ---
         this.ctx.save();
         this.ctx.translate(this.width/2, this.height/2);
         this.ctx.scale(this.camera.zoom, this.camera.zoom);
@@ -2646,8 +2099,6 @@ class GameLoop {
         });
         this.ctx.globalCompositeOperation = 'source-over';
 
-        this.debris.forEach(d => d.render(this.ctx)); // Render debris under particles/enemies? Or maybe under food?
-
         this.particles.forEach(p => { this.ctx.globalAlpha = p.life * 2; this.ctx.fillStyle = p.color; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); this.ctx.fill(); });
         this.ctx.globalAlpha = 1.0;
 
@@ -2655,9 +2106,12 @@ class GameLoop {
 
         if (this.gameState === 'playing' || this.gameState === 'paused') {
             this.renderer.drawCreature(this.creature, this.headAngle);
-
-            // Diegetic UI: Removed Health Bar
-            // Health is now visualized via creature glow/color in Renderer
+            const head = this.creature.points[0];
+            const scale = head.radius / head.baseRadius;
+            this.ctx.fillStyle = '#333';
+            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale, 5 * scale);
+            this.ctx.fillStyle = this.creature.gameStats.health < 20 ? '#f00' : '#0f0';
+            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale * (Math.max(0, this.creature.gameStats.health) / 100), 5 * scale);
         }
 
         this.camera.restore(this.ctx);
