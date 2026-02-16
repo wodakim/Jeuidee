@@ -1,4 +1,5 @@
 import Physics from './physics.js';
+import { PARTS_DB } from './progression.js';
 
 export default class Editor {
     constructor(game) {
@@ -34,10 +35,8 @@ export default class Editor {
                 <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; box-shadow:0 0 10px rgba(255,0,255,0.2);">PLAY</button>
             </div>
 
-            <div class="editor-sidebar right">
-                <div class="part-item" data-type="Fin">FIN (5)</div>
-                <div class="part-item" data-type="Spike">SPIKE (5)</div>
-                <div class="part-item" data-type="Eye">EYE (5)</div>
+            <div class="editor-sidebar right" id="editor-parts-list">
+                <!-- Populated Dynamically -->
             </div>
 
             <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:'Orbitron'; font-size:1.5rem; text-shadow:0 0 10px #0ff;">
@@ -46,7 +45,6 @@ export default class Editor {
 
             <div class="glass-panel" style="position:absolute; bottom:100px; left:20px; padding:15px; width:200px; display:none;">
                 <div style="color:#fff; font-size:0.8rem;">STATS PREVIEW</div>
-                <!-- Stats logic can be added here -->
             </div>
         `;
         document.body.appendChild(this.overlay);
@@ -55,25 +53,46 @@ export default class Editor {
         document.getElementById('close-editor-btn').addEventListener('click', () => this.toggle(false));
         document.getElementById('add-vertebra-btn').addEventListener('click', () => this.addVertebra());
 
-        // Part Dragging (Touch & Mouse)
-        const parts = document.querySelectorAll('.part-item');
-        parts.forEach(p => {
-            p.addEventListener('mousedown', (e) => this.startDrag(e, p.dataset.type));
-            p.addEventListener('touchstart', (e) => this.startDrag(e, p.dataset.type), {passive: false});
-        });
-
         // Global Drag Listeners (Window)
         window.addEventListener('mousemove', (e) => this.onDrag(e));
         window.addEventListener('touchmove', (e) => this.onDrag(e), {passive: false});
         window.addEventListener('mouseup', (e) => this.endDrag(e));
         window.addEventListener('touchend', (e) => this.endDrag(e));
+
+        // Tap on canvas for selection (only when editor active)
+        this.game.canvas.addEventListener('mousedown', (e) => this.onCanvasClick(e));
+        this.game.canvas.addEventListener('touchstart', (e) => this.onCanvasClick(e), {passive: false});
+    }
+
+    refreshParts() {
+        const list = document.getElementById('editor-parts-list');
+        list.innerHTML = '';
+
+        const unlocked = this.game.progression.getAvailableParts();
+        unlocked.forEach(key => {
+            const part = PARTS_DB[key];
+            const div = document.createElement('div');
+            div.className = 'part-item';
+            div.dataset.type = key;
+            div.innerText = `${part.name} (${part.cost})`;
+            div.style.pointerEvents = 'auto'; // Ensure clickable
+
+            // Add Drag Listeners dynamically
+            div.addEventListener('mousedown', (e) => this.startDrag(e, key));
+            div.addEventListener('touchstart', (e) => this.startDrag(e, key), {passive: false});
+
+            list.appendChild(div);
+        });
     }
 
     toggle(active) {
         this.active = active;
         if (this.overlay) {
             this.overlay.style.display = active ? 'block' : 'none';
-            if (active) this.updateDNA();
+            if (active) {
+                this.updateDNA();
+                this.refreshParts();
+            }
         }
 
         if (active) {
@@ -169,12 +188,14 @@ export default class Editor {
         });
 
         if (closest) {
-            if (this.game.creature.gameStats.dna < 5) return;
+            const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
+
+            if (this.game.creature.gameStats.dna < cost) return;
 
             // Attach Part
             if (!this.game.creature.parts) this.game.creature.parts = [];
 
-            this.game.creature.gameStats.dna -= 5;
+            this.game.creature.gameStats.dna -= cost;
             this.updateDNA();
 
             // Calculate Side
@@ -219,8 +240,110 @@ export default class Editor {
         return { x: e.clientX, y: e.clientY };
     }
 
+    onCanvasClick(e) {
+        if (!this.active || this.isDragging) return;
+        // Don't trigger if touching UI
+        if (e.target !== this.game.canvas) return;
+
+        const pt = this.getEventPos(e);
+        const cam = this.game.camera;
+
+        // Check Bone Selection
+        let clicked = null;
+        this.game.creature.points.forEach((p, index) => {
+            const sp = cam.worldToScreen(p.x, p.y);
+            const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
+            if (dist < p.radius * cam.zoom * 2) { // Generous hit area
+                clicked = { p, index, sp };
+            }
+        });
+
+        if (clicked) {
+            this.selectedBone = clicked;
+            this.showResizeSlider(clicked);
+        } else {
+            this.selectedBone = null;
+            this.hideResizeSlider();
+        }
+    }
+
+    showResizeSlider(selection) {
+        let slider = document.getElementById('resize-slider-container');
+        if (!slider) {
+            slider = document.createElement('div');
+            slider.id = 'resize-slider-container';
+            slider.className = 'glass-panel';
+            slider.style = `position:absolute; width:150px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:5px; pointer-events:auto;`;
+            slider.innerHTML = `
+                <div style="font-size:0.8rem; color:#fff;">SCALE</div>
+                <input type="range" id="bone-scale" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
+            `;
+            document.body.appendChild(slider);
+
+            document.getElementById('bone-scale').addEventListener('input', (e) => {
+                if (this.selectedBone) {
+                    const scale = parseFloat(e.target.value);
+                    const base = this.selectedBone.p.baseRadius || 20; // Default fallback
+                    // We need to store original baseRadius somewhere if we want non-destructive editing
+                    // Actually, baseRadius IS the source of truth before mass scaling.
+                    // But if we edit it, we lose the previous value.
+                    // Let's assume current baseRadius is 1.0 scale relative to "norm".
+                    // Or simpler: We modify baseRadius directly.
+                    // But we need to know what "1.0" means.
+                    // Let's attach a 'scaleFactor' to the point.
+
+                    this.selectedBone.p.scaleFactor = scale;
+                    // baseRadius = initialRadius * scaleFactor?
+                    // InitialRadius is not stored.
+                    // Let's just multiply relative to current? No, drift.
+                    // Let's store `initialBaseRadius` on creation.
+                    if (!this.selectedBone.p.initialBaseRadius) this.selectedBone.p.initialBaseRadius = this.selectedBone.p.baseRadius;
+
+                    this.selectedBone.p.baseRadius = this.selectedBone.p.initialBaseRadius * scale;
+                }
+            });
+        }
+
+        // Position Slider near bone
+        slider.style.display = 'flex';
+        slider.style.left = `${selection.sp.x + 50}px`;
+        slider.style.top = `${selection.sp.y - 50}px`;
+
+        // Set value
+        const currentScale = selection.p.scaleFactor || 1.0;
+        document.getElementById('bone-scale').value = currentScale;
+    }
+
+    hideResizeSlider() {
+        const slider = document.getElementById('resize-slider-container');
+        if (slider) slider.style.display = 'none';
+    }
+
     render(ctx) {
         if (!this.active) return;
+
+        // Highlight Selected Bone
+        if (this.selectedBone) {
+            const cam = this.game.camera;
+            const p = this.selectedBone.p;
+            const sp = cam.worldToScreen(p.x, p.y);
+
+            // Update slider pos in case of camera movement (though camera is locked in editor usually)
+            // But creature moves physically
+            const slider = document.getElementById('resize-slider-container');
+            if(slider && slider.style.display !== 'none') {
+                 slider.style.left = `${sp.x + 40}px`;
+                 slider.style.top = `${sp.y - 40}px`;
+            }
+
+            ctx.save();
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, p.radius * cam.zoom * 1.2 + 5, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.restore();
+        }
 
         // 1. Draw UI Overlay for Dragging
         if (this.isDragging && this.selectedPart) {

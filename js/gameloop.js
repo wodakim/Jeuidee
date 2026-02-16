@@ -8,6 +8,7 @@ import Stats from './stats.js';
 import Renderer from './renderer.js';
 import SaveManager from './save_manager.js';
 import Settings from './settings.js';
+import Progression, { PARTS_DB } from './progression.js';
 
 class GameLoop {
     constructor() {
@@ -39,6 +40,7 @@ class GameLoop {
         };
 
         this.saveManager = new SaveManager(this);
+        this.progression = new Progression(this.saveManager);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
@@ -113,7 +115,7 @@ class GameLoop {
         // Game Over Screen
         const gameOver = document.createElement('div');
         gameOver.id = 'game-over';
-        gameOver.style.display = 'none';
+        gameOver.style = 'display:none';
         gameOver.innerHTML = `
             <h1 style="color:var(--danger); text-shadow:0 0 20px var(--danger);">EXTINCT</h1>
             <div style="margin-top:20px;">
@@ -121,6 +123,12 @@ class GameLoop {
             </div>
         `;
         document.body.appendChild(gameOver);
+
+        // Unlock Overlay
+        const unlockOverlay = document.createElement('div');
+        unlockOverlay.id = 'unlock-overlay';
+        unlockOverlay.style = `display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:500; align-items:center; justify-content:center;`;
+        document.body.appendChild(unlockOverlay);
 
         // HUD
         const hud = document.createElement('div');
@@ -136,15 +144,12 @@ class GameLoop {
     }
 
     setupEventListeners() {
-        // Main Menu
         document.getElementById('play-btn').onclick = () => this.startGame();
         document.getElementById('settings-btn').onclick = () => {
             document.getElementById('main-menu').style.display = 'none';
             document.getElementById('settings-menu').style.display = 'flex';
             this.updateSettingsButtons();
         };
-
-        // Settings
         document.getElementById('back-btn').onclick = () => {
             document.getElementById('settings-menu').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
@@ -157,25 +162,47 @@ class GameLoop {
         };
         document.getElementById('toggle-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('toggle-audio-btn').onclick = () => this.toggleAudio();
-
-        // Game
         document.getElementById('pause-trigger-btn').onclick = () => this.pauseGame();
         document.getElementById('respawn-btn').onclick = () => this.respawn();
         document.getElementById('evolve-btn').onclick = () => {
             this.editor.toggle(true);
             document.getElementById('evolve-btn').style.display = 'none';
         };
-
-        // Pause Menu
         document.getElementById('resume-btn').onclick = () => this.resumeGame();
         document.getElementById('quit-btn').onclick = () => {
             document.getElementById('pause-menu').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
-            document.getElementById('game-hud').style.display = 'none'; // Hide HUD
+            document.getElementById('game-hud').style.display = 'none';
             this.gameState = 'menu';
         };
         document.getElementById('pause-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('pause-audio-btn').onclick = () => this.toggleAudio();
+
+        // Unlock Card Click to continue
+        document.getElementById('unlock-overlay').onclick = () => {
+            document.getElementById('unlock-overlay').style.display = 'none';
+            this.resumeGame();
+        };
+    }
+
+    triggerUnlock(partKey) {
+        if (this.progression.unlock(partKey)) {
+            this.pauseGame(true); // True = Unlock Mode
+            const overlay = document.getElementById('unlock-overlay');
+            const part = PARTS_DB[partKey];
+            overlay.innerHTML = `
+                <div class="unlock-card">
+                    <h2 style="color:#0ff; margin-bottom:10px;">EVOLUTION UNLOCKED</h2>
+                    <div class="unlock-icon">${partKey[0]}</div>
+                    <h1 style="font-size:2rem; margin:10px 0;">${part.name}</h1>
+                    <p style="color:#aaa; font-size:0.9rem;">${part.desc}</p>
+                    <div style="margin-top:20px; color:#0f0; font-weight:bold;">${part.stat}</div>
+                    <div style="margin-top:20px; font-size:0.8rem; animation:pulse 1s infinite;">TAP TO CONTINUE</div>
+                </div>
+            `;
+            overlay.style.display = 'flex';
+            if (this.settings.audioEnabled) this.audio.playTone(400, 'sine', 0.5); // Victory sound
+        }
     }
 
     toggleFX() {
@@ -200,11 +227,13 @@ class GameLoop {
         document.getElementById('pause-audio-btn').innerText = audioText;
     }
 
-    pauseGame() {
+    pauseGame(isUnlock = false) {
         if (this.gameState === 'playing') {
             this.gameState = 'paused';
-            document.getElementById('pause-menu').style.display = 'flex';
-            this.updateSettingsButtons();
+            if (!isUnlock) {
+                document.getElementById('pause-menu').style.display = 'flex';
+                this.updateSettingsButtons();
+            }
         }
     }
 
@@ -222,7 +251,6 @@ class GameLoop {
         if (this.settings.audioEnabled) this.audio.ctx.resume();
     }
 
-    // ... (rest of init/resize/reset identical, just ensuring hud visibility logic)
     init() {
         this.resize();
         window.addEventListener('resize', () => this.resize());
@@ -231,18 +259,12 @@ class GameLoop {
         this.initBackground();
         this.spawnEnemies();
         this.spawnFood(50);
-
-        // Hide HUD initially
         document.getElementById('game-hud').style.display = 'none';
-
         this.start();
         setInterval(() => {
             if (this.gameState === 'playing') this.saveManager.save();
         }, 30000);
     }
-
-    // ... (resetCreature, respawn, spawnFood/Enemies, initBackground, resize, start same as before)
-    // Need to include them for file write to be complete
 
     resetCreature() {
         this.creature.points = [];
@@ -334,19 +356,40 @@ class GameLoop {
 
     initBackground() {
         this.bgAbyssal = []; this.bgDeep = []; this.bgMid = []; this.bgFore = [];
-        for(let i=0; i<5; i++) {
+
+        // Procedural Giants (Leviathans, Worms, Jellies)
+        for(let i=0; i<8; i++) {
+             const type = Math.random() > 0.5 ? 'worm' : 'jelly';
              const giant = {
+                 type: type,
                  x: (Math.random() - 0.5) * 8000,
                  y: (Math.random() - 0.5) * 8000,
-                 vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2,
-                 segments: []
+                 vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
+                 segments: [],
+                 tentacles: []
              };
-             const len = 10 + Math.random() * 10;
-             for(let j=0; j<len; j++) {
-                 giant.segments.push({ ox: j * 50, oy: Math.sin(j * 0.5) * 50, r: 100 + Math.random() * 100 });
+
+             if (type === 'worm') {
+                 const len = 20 + Math.random() * 20;
+                 for(let j=0; j<len; j++) {
+                     giant.segments.push({ ox: j * 60, oy: 0, r: 80 + Math.random() * 40 });
+                 }
+             } else {
+                 // Jelly
+                 giant.radius = 200 + Math.random() * 300;
+                 const tentacleCount = 5 + Math.floor(Math.random() * 5);
+                 for(let t=0; t<tentacleCount; t++) {
+                     const tentacle = [];
+                     const len = 10 + Math.random() * 10;
+                     for(let k=0; k<len; k++) {
+                         tentacle.push({ ox: (k*20), oy: (k*50) + Math.random()*20, r: 20 - k });
+                     }
+                     giant.tentacles.push(tentacle);
+                 }
              }
              this.bgAbyssal.push(giant);
         }
+
         for(let i=0; i<100; i++) this.bgDeep.push({ x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 6000, r: Math.random() * 4 + 2, alpha: Math.random() * 0.2 });
         for(let i=0; i<200; i++) this.bgMid.push({ x: (Math.random() - 0.5) * 4000, y: (Math.random() - 0.5) * 4000, r: Math.random() * 3, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, alpha: Math.random() * 0.3 });
         for(let i=0; i<50; i++) this.bgFore.push({ x: (Math.random() - 0.5) * 3000, y: (Math.random() - 0.5) * 3000, r: Math.random() * 2, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, alpha: Math.random() * 0.5 + 0.2 });
@@ -378,7 +421,6 @@ class GameLoop {
         } else if (this.gameState === 'menu') {
             this.updateBackgroundOnly(dt);
         }
-        // No update on paused
 
         this.render();
         requestAnimationFrame((t) => this.loop(t));
@@ -394,7 +436,7 @@ class GameLoop {
         if (this.editor.active) {
             this.physics.update(this.creature.points, this.creature.constraints, dt * 0.1);
             const head = this.creature.points[0];
-            this.camera.update(head.x, head.y, 0, 0, dt);
+            this.camera.update(head.x, head.y, 0, 0, dt, this.creature.gameStats.mass);
             return;
         }
 
@@ -444,6 +486,11 @@ class GameLoop {
                 if (e.health <= 0) {
                      this.spawnParticles(mx, my, '#ffaa00', 20, 400);
                      this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
+
+                     // Check Drop
+                     const drop = this.progression.checkDrop(null, e.difficulty);
+                     if (drop) this.triggerUnlock(drop);
+
                      this.enemies.splice(i, 1);
                      continue;
                 }
@@ -477,7 +524,7 @@ class GameLoop {
             if (btn && btn.style.display === 'none') btn.style.display = 'block';
         }
 
-        this.camera.update(head.x, head.y, head.vx, head.vy, dt);
+        this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
@@ -498,15 +545,41 @@ class GameLoop {
         bgGrad.addColorStop(0, '#000510'); bgGrad.addColorStop(1, '#001020');
         this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
 
-        // Layers
+        // --- LAYER 0: ABYSSAL GIANTS (Parallax 0.05) ---
         this.ctx.save();
         this.ctx.translate(this.width/2, this.height/2);
         this.ctx.scale(this.camera.zoom, this.camera.zoom);
         this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
         this.ctx.fillStyle = '#000810';
-        if(this.settings.fxEnabled) this.ctx.filter = 'blur(10px)';
+        if(this.settings.fxEnabled) this.ctx.filter = 'blur(15px)';
+
         this.bgAbyssal.forEach(g => {
-            this.ctx.beginPath(); g.segments.forEach(s => this.ctx.arc(g.x + s.ox, g.y + s.oy, s.r, 0, Math.PI * 2)); this.ctx.fill();
+            if (g.type === 'worm') {
+                // Draw Worm Spine
+                g.segments.forEach((s, i) => {
+                    const wave = Math.sin(Date.now() * 0.001 + i * 0.5) * 50;
+                    this.ctx.beginPath();
+                    this.ctx.arc(g.x + s.ox, g.y + s.oy + wave, s.r, 0, Math.PI * 2);
+                    this.ctx.fill();
+                });
+            } else {
+                // Draw Jelly
+                const float = Math.sin(Date.now() * 0.0005) * 50;
+                this.ctx.beginPath();
+                this.ctx.arc(g.x, g.y + float, g.radius, Math.PI, 0); // Semi-circle head
+                this.ctx.fill();
+                // Tentacles
+                if (g.tentacles) {
+                    g.tentacles.forEach((t, ti) => {
+                        t.forEach((seg, k) => {
+                            const wave = Math.sin(Date.now() * 0.002 + k * 0.2 + ti) * 30;
+                            this.ctx.beginPath();
+                            this.ctx.arc(g.x + (ti-2)*60 + wave, g.y + float + seg.oy, seg.r, 0, Math.PI*2);
+                            this.ctx.fill();
+                        });
+                    });
+                }
+            }
         });
         this.ctx.filter = 'none';
         this.ctx.restore();

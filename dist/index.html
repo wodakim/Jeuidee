@@ -203,6 +203,49 @@ h1 {
     box-shadow: 0 -5px 20px rgba(0,255,255,0.1);
 }
 
+/* UNLOCK CARD OVERLAY */
+#unlock-overlay {
+    perspective: 1000px;
+    background: rgba(0,0,0,0.9);
+}
+
+.unlock-card {
+    width: 250px;
+    height: 350px;
+    background: linear-gradient(135deg, #001, #003);
+    border: 2px solid var(--primary);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 50px var(--primary);
+    transform-style: preserve-3d;
+    animation: spinCard 2s ease-out forwards;
+    padding: 20px;
+    text-align: center;
+}
+
+.unlock-icon {
+    width: 100px;
+    height: 100px;
+    background: rgba(0,255,255,0.1);
+    border-radius: 50%;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    color: var(--primary);
+    box-shadow: inset 0 0 20px var(--primary);
+}
+
+@keyframes spinCard {
+    0% { transform: rotateY(720deg) scale(0); opacity: 0; }
+    80% { transform: rotateY(0deg) scale(1.1); opacity: 1; }
+    100% { transform: rotateY(0deg) scale(1); }
+}
+
 </style>
 </head>
 <body>
@@ -404,7 +447,6 @@ class Stats {
 
 
 // --- js/camera.js ---
-
 class Camera {
     constructor(width, height) {
         this.x = 0;
@@ -418,6 +460,7 @@ class Camera {
         // Settings
         this.followStrength = 0.05; // Lerp factor (lower = smoother/lazier)
         this.lookAhead = 100; // How far to look ahead based on velocity
+        this.baseZoom = 1.0;
     }
 
     resize(w, h) {
@@ -425,40 +468,49 @@ class Camera {
         this.viewportHeight = h;
     }
 
-    update(targetX, targetY, targetVx, targetVy, dt) {
+    update(targetX, targetY, targetVx, targetVy, dt, playerMass = 10) {
         // 1. Calculate Target Position (Center on player + Lookahead)
-        // We want the player to be in the center, so Camera coordinates are top-left of the view
-
-        // Target is the world position we want in the center of the screen
         const idealX = targetX + targetVx * 0.5; // Lookahead
         const idealY = targetY + targetVy * 0.5;
 
         // 2. Smoothly interpolate current camera position towards ideal
-        // Note: Camera.x/y represents the CENTER of the view in World Space
         this.x += (idealX - this.x) * this.followStrength;
         this.y += (idealY - this.y) * this.followStrength;
 
-        // 3. Zoom Logic (Dynamic based on speed?)
+        // 3. Zoom Logic (Dynamic based on Mass and Speed)
+        // Base scale inverse to mass
+        // Mass 10 -> Scale 1.0
+        // Mass 100 -> Scale 3.16 -> Zoom ~0.3
+
+        const playerScale = Math.sqrt(playerMass / 10);
+
+        // Target Zoom is inverse of player scale, but clamped
+        // Zoom out as player gets bigger to keep view consistent relative to player size
+        const massZoom = this.baseZoom / Math.max(1, playerScale * 0.8);
+
+        // Also zoom out slightly with speed
         const speed = Math.hypot(targetVx, targetVy);
-        // Base zoom 1, zoom out to 0.5 at high speed
         const speedFactor = Math.min(speed / 1000, 1);
-        this.targetZoom = 1 - (speedFactor * 0.3); // Max zoom out 0.7
+        const speedZoomMod = 1 - (speedFactor * 0.2);
+
+        this.targetZoom = massZoom * speedZoomMod;
+
+        // Clamp min zoom to avoid seeing edge of world if we had one (but world is infinite parallax)
+        this.targetZoom = Math.max(0.1, this.targetZoom);
 
         this.zoom += (this.targetZoom - this.zoom) * 0.02; // Slow zoom
     }
 
     // Convert World Point to Screen Point
     worldToScreen(wx, wy) {
-        // (World - Cam) * Zoom + HalfScreen
         return {
             x: (wx - this.x) * this.zoom + this.viewportWidth / 2,
             y: (wy - this.y) * this.zoom + this.viewportHeight / 2
         };
     }
 
-    // Convert Screen Point to World Point (for Input)
+    // Convert Screen Point to World Point
     screenToWorld(sx, sy) {
-        // (Screen - HalfScreen) / Zoom + Cam
         return {
             x: (sx - this.viewportWidth / 2) / this.zoom + this.x,
             y: (sy - this.viewportHeight / 2) / this.zoom + this.y
@@ -685,6 +737,125 @@ class SaveManager {
         localStorage.removeItem(this.key);
     }
 }
+
+
+// --- js/progression.js ---
+const PARTS_DB = {
+    'Fin': {
+        name: 'Fin',
+        desc: 'Increases Swim Speed and Turn Rate.',
+        stat: '+ Speed',
+        unlocked: true, // Default
+        cost: 5
+    },
+    'Spike': {
+        name: 'Spike',
+        desc: 'Deals damage on contact. Increases Defense.',
+        stat: '+ Damage',
+        unlocked: true, // Default
+        cost: 5
+    },
+    'Eye': {
+        name: 'Eye',
+        desc: 'Increases Field of View.',
+        stat: '+ Vision',
+        unlocked: true, // Default
+        cost: 5
+    },
+    'Tentacle': {
+        name: 'Tentacle',
+        desc: 'Wiggles and pushes enemies away.',
+        stat: '+ Control',
+        unlocked: false,
+        cost: 10
+    },
+    'Shield': {
+        name: 'Chitin Plate',
+        desc: 'Heavy armor that reduces incoming damage.',
+        stat: '++ Defense',
+        unlocked: false,
+        cost: 10
+    },
+    'Booster': {
+        name: 'Jet Gland',
+        desc: 'Burst of speed when moving forward.',
+        stat: '++ Speed',
+        unlocked: false,
+        cost: 15
+    },
+    'Poison': {
+        name: 'Toxin Sac',
+        desc: 'Enemies take damage over time after contact.',
+        stat: '+ Poison',
+        unlocked: false,
+        cost: 15
+    }
+};
+
+class Progression {
+    constructor(saveManager) {
+        this.saveManager = saveManager;
+        this.unlocked = ['Fin', 'Spike', 'Eye']; // Start with basics
+        this.load();
+    }
+
+    load() {
+        const saved = localStorage.getItem('jelly_unlocks');
+        if (saved) {
+            this.unlocked = JSON.parse(saved);
+        }
+        // Sync with DB
+        this.unlocked.forEach(key => {
+            if(PARTS_DB[key]) PARTS_DB[key].unlocked = true;
+        });
+    }
+
+    save() {
+        localStorage.setItem('jelly_unlocks', JSON.stringify(this.unlocked));
+    }
+
+    unlock(key) {
+        if (!this.unlocked.includes(key) && PARTS_DB[key]) {
+            this.unlocked.push(key);
+            PARTS_DB[key].unlocked = true;
+            this.save();
+            return true;
+        }
+        return false;
+    }
+
+    isUnlocked(key) {
+        return this.unlocked.includes(key);
+    }
+
+    getAvailableParts() {
+        return Object.keys(PARTS_DB).filter(k => this.unlocked.includes(k));
+    }
+
+    checkDrop(enemyType, difficulty) {
+        // Chance to unlock based on enemy
+        const chance = 0.3; // 30% drop chance
+        if (Math.random() > chance) return null;
+
+        // Determine potential drop based on difficulty/type
+        let potential = [];
+        if (difficulty > 2) potential.push('Tentacle');
+        if (difficulty > 4) potential.push('Shield');
+        if (difficulty > 6) potential.push('Booster');
+        if (difficulty > 8) potential.push('Poison');
+
+        // Filter out already unlocked
+        potential = potential.filter(p => !this.unlocked.includes(p));
+
+        if (potential.length > 0) {
+            const drop = potential[Math.floor(Math.random() * potential.length)];
+            return drop;
+        }
+        return null;
+    }
+}
+
+
 
 
 // --- js/input.js ---
@@ -944,6 +1115,7 @@ class Enemy {
 // --- js/editor.js ---
 
 
+
 class Editor {
     constructor(game) {
         this.game = game;
@@ -978,10 +1150,8 @@ class Editor {
                 <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; box-shadow:0 0 10px rgba(255,0,255,0.2);">PLAY</button>
             </div>
 
-            <div class="editor-sidebar right">
-                <div class="part-item" data-type="Fin">FIN (5)</div>
-                <div class="part-item" data-type="Spike">SPIKE (5)</div>
-                <div class="part-item" data-type="Eye">EYE (5)</div>
+            <div class="editor-sidebar right" id="editor-parts-list">
+                <!-- Populated Dynamically -->
             </div>
 
             <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:'Orbitron'; font-size:1.5rem; text-shadow:0 0 10px #0ff;">
@@ -990,7 +1160,6 @@ class Editor {
 
             <div class="glass-panel" style="position:absolute; bottom:100px; left:20px; padding:15px; width:200px; display:none;">
                 <div style="color:#fff; font-size:0.8rem;">STATS PREVIEW</div>
-                <!-- Stats logic can be added here -->
             </div>
         `;
         document.body.appendChild(this.overlay);
@@ -999,25 +1168,46 @@ class Editor {
         document.getElementById('close-editor-btn').addEventListener('click', () => this.toggle(false));
         document.getElementById('add-vertebra-btn').addEventListener('click', () => this.addVertebra());
 
-        // Part Dragging (Touch & Mouse)
-        const parts = document.querySelectorAll('.part-item');
-        parts.forEach(p => {
-            p.addEventListener('mousedown', (e) => this.startDrag(e, p.dataset.type));
-            p.addEventListener('touchstart', (e) => this.startDrag(e, p.dataset.type), {passive: false});
-        });
-
         // Global Drag Listeners (Window)
         window.addEventListener('mousemove', (e) => this.onDrag(e));
         window.addEventListener('touchmove', (e) => this.onDrag(e), {passive: false});
         window.addEventListener('mouseup', (e) => this.endDrag(e));
         window.addEventListener('touchend', (e) => this.endDrag(e));
+
+        // Tap on canvas for selection (only when editor active)
+        this.game.canvas.addEventListener('mousedown', (e) => this.onCanvasClick(e));
+        this.game.canvas.addEventListener('touchstart', (e) => this.onCanvasClick(e), {passive: false});
+    }
+
+    refreshParts() {
+        const list = document.getElementById('editor-parts-list');
+        list.innerHTML = '';
+
+        const unlocked = this.game.progression.getAvailableParts();
+        unlocked.forEach(key => {
+            const part = PARTS_DB[key];
+            const div = document.createElement('div');
+            div.className = 'part-item';
+            div.dataset.type = key;
+            div.innerText = `${part.name} (${part.cost})`;
+            div.style.pointerEvents = 'auto'; // Ensure clickable
+
+            // Add Drag Listeners dynamically
+            div.addEventListener('mousedown', (e) => this.startDrag(e, key));
+            div.addEventListener('touchstart', (e) => this.startDrag(e, key), {passive: false});
+
+            list.appendChild(div);
+        });
     }
 
     toggle(active) {
         this.active = active;
         if (this.overlay) {
             this.overlay.style.display = active ? 'block' : 'none';
-            if (active) this.updateDNA();
+            if (active) {
+                this.updateDNA();
+                this.refreshParts();
+            }
         }
 
         if (active) {
@@ -1113,12 +1303,14 @@ class Editor {
         });
 
         if (closest) {
-            if (this.game.creature.gameStats.dna < 5) return;
+            const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
+
+            if (this.game.creature.gameStats.dna < cost) return;
 
             // Attach Part
             if (!this.game.creature.parts) this.game.creature.parts = [];
 
-            this.game.creature.gameStats.dna -= 5;
+            this.game.creature.gameStats.dna -= cost;
             this.updateDNA();
 
             // Calculate Side
@@ -1163,8 +1355,110 @@ class Editor {
         return { x: e.clientX, y: e.clientY };
     }
 
+    onCanvasClick(e) {
+        if (!this.active || this.isDragging) return;
+        // Don't trigger if touching UI
+        if (e.target !== this.game.canvas) return;
+
+        const pt = this.getEventPos(e);
+        const cam = this.game.camera;
+
+        // Check Bone Selection
+        let clicked = null;
+        this.game.creature.points.forEach((p, index) => {
+            const sp = cam.worldToScreen(p.x, p.y);
+            const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
+            if (dist < p.radius * cam.zoom * 2) { // Generous hit area
+                clicked = { p, index, sp };
+            }
+        });
+
+        if (clicked) {
+            this.selectedBone = clicked;
+            this.showResizeSlider(clicked);
+        } else {
+            this.selectedBone = null;
+            this.hideResizeSlider();
+        }
+    }
+
+    showResizeSlider(selection) {
+        let slider = document.getElementById('resize-slider-container');
+        if (!slider) {
+            slider = document.createElement('div');
+            slider.id = 'resize-slider-container';
+            slider.className = 'glass-panel';
+            slider.style = `position:absolute; width:150px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:5px; pointer-events:auto;`;
+            slider.innerHTML = `
+                <div style="font-size:0.8rem; color:#fff;">SCALE</div>
+                <input type="range" id="bone-scale" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
+            `;
+            document.body.appendChild(slider);
+
+            document.getElementById('bone-scale').addEventListener('input', (e) => {
+                if (this.selectedBone) {
+                    const scale = parseFloat(e.target.value);
+                    const base = this.selectedBone.p.baseRadius || 20; // Default fallback
+                    // We need to store original baseRadius somewhere if we want non-destructive editing
+                    // Actually, baseRadius IS the source of truth before mass scaling.
+                    // But if we edit it, we lose the previous value.
+                    // Let's assume current baseRadius is 1.0 scale relative to "norm".
+                    // Or simpler: We modify baseRadius directly.
+                    // But we need to know what "1.0" means.
+                    // Let's attach a 'scaleFactor' to the point.
+
+                    this.selectedBone.p.scaleFactor = scale;
+                    // baseRadius = initialRadius * scaleFactor?
+                    // InitialRadius is not stored.
+                    // Let's just multiply relative to current? No, drift.
+                    // Let's store `initialBaseRadius` on creation.
+                    if (!this.selectedBone.p.initialBaseRadius) this.selectedBone.p.initialBaseRadius = this.selectedBone.p.baseRadius;
+
+                    this.selectedBone.p.baseRadius = this.selectedBone.p.initialBaseRadius * scale;
+                }
+            });
+        }
+
+        // Position Slider near bone
+        slider.style.display = 'flex';
+        slider.style.left = `${selection.sp.x + 50}px`;
+        slider.style.top = `${selection.sp.y - 50}px`;
+
+        // Set value
+        const currentScale = selection.p.scaleFactor || 1.0;
+        document.getElementById('bone-scale').value = currentScale;
+    }
+
+    hideResizeSlider() {
+        const slider = document.getElementById('resize-slider-container');
+        if (slider) slider.style.display = 'none';
+    }
+
     render(ctx) {
         if (!this.active) return;
+
+        // Highlight Selected Bone
+        if (this.selectedBone) {
+            const cam = this.game.camera;
+            const p = this.selectedBone.p;
+            const sp = cam.worldToScreen(p.x, p.y);
+
+            // Update slider pos in case of camera movement (though camera is locked in editor usually)
+            // But creature moves physically
+            const slider = document.getElementById('resize-slider-container');
+            if(slider && slider.style.display !== 'none') {
+                 slider.style.left = `${sp.x + 40}px`;
+                 slider.style.top = `${sp.y - 40}px`;
+            }
+
+            ctx.save();
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, p.radius * cam.zoom * 1.2 + 5, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.restore();
+        }
 
         // 1. Draw UI Overlay for Dragging
         if (this.isDragging && this.selectedPart) {
@@ -1221,6 +1515,7 @@ class Editor {
 
 
 
+
 class GameLoop {
     constructor() {
         this.running = false;
@@ -1251,6 +1546,7 @@ class GameLoop {
         };
 
         this.saveManager = new SaveManager(this);
+        this.progression = new Progression(this.saveManager);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
@@ -1325,7 +1621,7 @@ class GameLoop {
         // Game Over Screen
         const gameOver = document.createElement('div');
         gameOver.id = 'game-over';
-        gameOver.style.display = 'none';
+        gameOver.style = 'display:none';
         gameOver.innerHTML = `
             <h1 style="color:var(--danger); text-shadow:0 0 20px var(--danger);">EXTINCT</h1>
             <div style="margin-top:20px;">
@@ -1333,6 +1629,12 @@ class GameLoop {
             </div>
         `;
         document.body.appendChild(gameOver);
+
+        // Unlock Overlay
+        const unlockOverlay = document.createElement('div');
+        unlockOverlay.id = 'unlock-overlay';
+        unlockOverlay.style = `display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:500; align-items:center; justify-content:center;`;
+        document.body.appendChild(unlockOverlay);
 
         // HUD
         const hud = document.createElement('div');
@@ -1348,15 +1650,12 @@ class GameLoop {
     }
 
     setupEventListeners() {
-        // Main Menu
         document.getElementById('play-btn').onclick = () => this.startGame();
         document.getElementById('settings-btn').onclick = () => {
             document.getElementById('main-menu').style.display = 'none';
             document.getElementById('settings-menu').style.display = 'flex';
             this.updateSettingsButtons();
         };
-
-        // Settings
         document.getElementById('back-btn').onclick = () => {
             document.getElementById('settings-menu').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
@@ -1369,25 +1668,47 @@ class GameLoop {
         };
         document.getElementById('toggle-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('toggle-audio-btn').onclick = () => this.toggleAudio();
-
-        // Game
         document.getElementById('pause-trigger-btn').onclick = () => this.pauseGame();
         document.getElementById('respawn-btn').onclick = () => this.respawn();
         document.getElementById('evolve-btn').onclick = () => {
             this.editor.toggle(true);
             document.getElementById('evolve-btn').style.display = 'none';
         };
-
-        // Pause Menu
         document.getElementById('resume-btn').onclick = () => this.resumeGame();
         document.getElementById('quit-btn').onclick = () => {
             document.getElementById('pause-menu').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
-            document.getElementById('game-hud').style.display = 'none'; // Hide HUD
+            document.getElementById('game-hud').style.display = 'none';
             this.gameState = 'menu';
         };
         document.getElementById('pause-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('pause-audio-btn').onclick = () => this.toggleAudio();
+
+        // Unlock Card Click to continue
+        document.getElementById('unlock-overlay').onclick = () => {
+            document.getElementById('unlock-overlay').style.display = 'none';
+            this.resumeGame();
+        };
+    }
+
+    triggerUnlock(partKey) {
+        if (this.progression.unlock(partKey)) {
+            this.pauseGame(true); // True = Unlock Mode
+            const overlay = document.getElementById('unlock-overlay');
+            const part = PARTS_DB[partKey];
+            overlay.innerHTML = `
+                <div class="unlock-card">
+                    <h2 style="color:#0ff; margin-bottom:10px;">EVOLUTION UNLOCKED</h2>
+                    <div class="unlock-icon">${partKey[0]}</div>
+                    <h1 style="font-size:2rem; margin:10px 0;">${part.name}</h1>
+                    <p style="color:#aaa; font-size:0.9rem;">${part.desc}</p>
+                    <div style="margin-top:20px; color:#0f0; font-weight:bold;">${part.stat}</div>
+                    <div style="margin-top:20px; font-size:0.8rem; animation:pulse 1s infinite;">TAP TO CONTINUE</div>
+                </div>
+            `;
+            overlay.style.display = 'flex';
+            if (this.settings.audioEnabled) this.audio.playTone(400, 'sine', 0.5); // Victory sound
+        }
     }
 
     toggleFX() {
@@ -1412,11 +1733,13 @@ class GameLoop {
         document.getElementById('pause-audio-btn').innerText = audioText;
     }
 
-    pauseGame() {
+    pauseGame(isUnlock = false) {
         if (this.gameState === 'playing') {
             this.gameState = 'paused';
-            document.getElementById('pause-menu').style.display = 'flex';
-            this.updateSettingsButtons();
+            if (!isUnlock) {
+                document.getElementById('pause-menu').style.display = 'flex';
+                this.updateSettingsButtons();
+            }
         }
     }
 
@@ -1434,7 +1757,6 @@ class GameLoop {
         if (this.settings.audioEnabled) this.audio.ctx.resume();
     }
 
-    // ... (rest of init/resize/reset identical, just ensuring hud visibility logic)
     init() {
         this.resize();
         window.addEventListener('resize', () => this.resize());
@@ -1443,18 +1765,12 @@ class GameLoop {
         this.initBackground();
         this.spawnEnemies();
         this.spawnFood(50);
-
-        // Hide HUD initially
         document.getElementById('game-hud').style.display = 'none';
-
         this.start();
         setInterval(() => {
             if (this.gameState === 'playing') this.saveManager.save();
         }, 30000);
     }
-
-    // ... (resetCreature, respawn, spawnFood/Enemies, initBackground, resize, start same as before)
-    // Need to include them for file write to be complete
 
     resetCreature() {
         this.creature.points = [];
@@ -1546,19 +1862,40 @@ class GameLoop {
 
     initBackground() {
         this.bgAbyssal = []; this.bgDeep = []; this.bgMid = []; this.bgFore = [];
-        for(let i=0; i<5; i++) {
+
+        // Procedural Giants (Leviathans, Worms, Jellies)
+        for(let i=0; i<8; i++) {
+             const type = Math.random() > 0.5 ? 'worm' : 'jelly';
              const giant = {
+                 type: type,
                  x: (Math.random() - 0.5) * 8000,
                  y: (Math.random() - 0.5) * 8000,
-                 vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2,
-                 segments: []
+                 vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
+                 segments: [],
+                 tentacles: []
              };
-             const len = 10 + Math.random() * 10;
-             for(let j=0; j<len; j++) {
-                 giant.segments.push({ ox: j * 50, oy: Math.sin(j * 0.5) * 50, r: 100 + Math.random() * 100 });
+
+             if (type === 'worm') {
+                 const len = 20 + Math.random() * 20;
+                 for(let j=0; j<len; j++) {
+                     giant.segments.push({ ox: j * 60, oy: 0, r: 80 + Math.random() * 40 });
+                 }
+             } else {
+                 // Jelly
+                 giant.radius = 200 + Math.random() * 300;
+                 const tentacleCount = 5 + Math.floor(Math.random() * 5);
+                 for(let t=0; t<tentacleCount; t++) {
+                     const tentacle = [];
+                     const len = 10 + Math.random() * 10;
+                     for(let k=0; k<len; k++) {
+                         tentacle.push({ ox: (k*20), oy: (k*50) + Math.random()*20, r: 20 - k });
+                     }
+                     giant.tentacles.push(tentacle);
+                 }
              }
              this.bgAbyssal.push(giant);
         }
+
         for(let i=0; i<100; i++) this.bgDeep.push({ x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 6000, r: Math.random() * 4 + 2, alpha: Math.random() * 0.2 });
         for(let i=0; i<200; i++) this.bgMid.push({ x: (Math.random() - 0.5) * 4000, y: (Math.random() - 0.5) * 4000, r: Math.random() * 3, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, alpha: Math.random() * 0.3 });
         for(let i=0; i<50; i++) this.bgFore.push({ x: (Math.random() - 0.5) * 3000, y: (Math.random() - 0.5) * 3000, r: Math.random() * 2, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, alpha: Math.random() * 0.5 + 0.2 });
@@ -1590,7 +1927,6 @@ class GameLoop {
         } else if (this.gameState === 'menu') {
             this.updateBackgroundOnly(dt);
         }
-        // No update on paused
 
         this.render();
         requestAnimationFrame((t) => this.loop(t));
@@ -1606,7 +1942,7 @@ class GameLoop {
         if (this.editor.active) {
             this.physics.update(this.creature.points, this.creature.constraints, dt * 0.1);
             const head = this.creature.points[0];
-            this.camera.update(head.x, head.y, 0, 0, dt);
+            this.camera.update(head.x, head.y, 0, 0, dt, this.creature.gameStats.mass);
             return;
         }
 
@@ -1656,6 +1992,11 @@ class GameLoop {
                 if (e.health <= 0) {
                      this.spawnParticles(mx, my, '#ffaa00', 20, 400);
                      this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
+
+                     // Check Drop
+                     const drop = this.progression.checkDrop(null, e.difficulty);
+                     if (drop) this.triggerUnlock(drop);
+
                      this.enemies.splice(i, 1);
                      continue;
                 }
@@ -1689,7 +2030,7 @@ class GameLoop {
             if (btn && btn.style.display === 'none') btn.style.display = 'block';
         }
 
-        this.camera.update(head.x, head.y, head.vx, head.vy, dt);
+        this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
@@ -1710,15 +2051,41 @@ class GameLoop {
         bgGrad.addColorStop(0, '#000510'); bgGrad.addColorStop(1, '#001020');
         this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
 
-        // Layers
+        // --- LAYER 0: ABYSSAL GIANTS (Parallax 0.05) ---
         this.ctx.save();
         this.ctx.translate(this.width/2, this.height/2);
         this.ctx.scale(this.camera.zoom, this.camera.zoom);
         this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
         this.ctx.fillStyle = '#000810';
-        if(this.settings.fxEnabled) this.ctx.filter = 'blur(10px)';
+        if(this.settings.fxEnabled) this.ctx.filter = 'blur(15px)';
+
         this.bgAbyssal.forEach(g => {
-            this.ctx.beginPath(); g.segments.forEach(s => this.ctx.arc(g.x + s.ox, g.y + s.oy, s.r, 0, Math.PI * 2)); this.ctx.fill();
+            if (g.type === 'worm') {
+                // Draw Worm Spine
+                g.segments.forEach((s, i) => {
+                    const wave = Math.sin(Date.now() * 0.001 + i * 0.5) * 50;
+                    this.ctx.beginPath();
+                    this.ctx.arc(g.x + s.ox, g.y + s.oy + wave, s.r, 0, Math.PI * 2);
+                    this.ctx.fill();
+                });
+            } else {
+                // Draw Jelly
+                const float = Math.sin(Date.now() * 0.0005) * 50;
+                this.ctx.beginPath();
+                this.ctx.arc(g.x, g.y + float, g.radius, Math.PI, 0); // Semi-circle head
+                this.ctx.fill();
+                // Tentacles
+                if (g.tentacles) {
+                    g.tentacles.forEach((t, ti) => {
+                        t.forEach((seg, k) => {
+                            const wave = Math.sin(Date.now() * 0.002 + k * 0.2 + ti) * 30;
+                            this.ctx.beginPath();
+                            this.ctx.arc(g.x + (ti-2)*60 + wave, g.y + float + seg.oy, seg.r, 0, Math.PI*2);
+                            this.ctx.fill();
+                        });
+                    });
+                }
+            }
         });
         this.ctx.filter = 'none';
         this.ctx.restore();
