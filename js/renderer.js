@@ -1,12 +1,13 @@
 export default class Renderer {
-    constructor(ctx, camera) {
+    constructor(ctx, camera, settings) {
         this.ctx = ctx;
         this.camera = camera;
+        this.settings = settings;
     }
 
     drawCreature(creature, headAngle = 0) {
-        // Enable Additive Blending for "Bioluminescent" look
-        this.ctx.globalCompositeOperation = 'lighter';
+        // Enable Additive Blending for "Bioluminescent" look if enabled
+        if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
 
         const points = creature.points;
         const color = creature.color || '#00ffff';
@@ -85,22 +86,28 @@ export default class Renderer {
 
         if (type === 'Fin') {
             this.ctx.fillStyle = bodyColor;
-            this.ctx.shadowColor = bodyColor;
-            this.ctx.shadowBlur = 20;
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = bodyColor;
+                this.ctx.shadowBlur = 20;
+            }
             this.ctx.beginPath();
             this.ctx.moveTo(0, 0);
             this.ctx.quadraticCurveTo(15, -15, 40, 0);
             this.ctx.quadraticCurveTo(15, 15, 0, 0);
             this.ctx.fill();
+            this.ctx.shadowBlur = 0;
         } else if (type === 'Spike') {
             this.ctx.fillStyle = '#ff0044';
-            this.ctx.shadowColor = '#f04';
-            this.ctx.shadowBlur = 15;
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#f04';
+                this.ctx.shadowBlur = 15;
+            }
             this.ctx.beginPath();
             this.ctx.moveTo(0, -8);
             this.ctx.lineTo(35, 0);
             this.ctx.lineTo(0, 8);
             this.ctx.fill();
+            this.ctx.shadowBlur = 0;
         } else if (type === 'Eye') {
              // Eyes drawn in main loop
         }
