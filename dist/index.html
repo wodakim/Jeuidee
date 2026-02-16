@@ -1,0 +1,2368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jelly Evolution (Prototype)</title>
+    <style>
+/* NEON ABYSS THEME */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500;700&display=swap');
+
+:root {
+    --primary: #00ffff;
+    --secondary: #ff00ff;
+    --danger: #ff4444;
+    --dark: #000510;
+    --glass: rgba(0, 10, 20, 0.6);
+    --border: 1px solid rgba(0, 255, 255, 0.2);
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--dark);
+    font-family: 'Rajdhani', sans-serif;
+    color: #fff;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+
+#game-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* UI UTILS */
+.glass-panel {
+    background: var(--glass);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: var(--border);
+    border-radius: 16px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.btn-neon {
+    background: linear-gradient(135deg, rgba(0,255,255,0.1), rgba(0,255,255,0.0));
+    border: 1px solid var(--primary);
+    color: var(--primary);
+    padding: 12px 30px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 30px;
+    transition: all 0.2s ease;
+    text-shadow: 0 0 5px var(--primary);
+    box-shadow: 0 0 10px rgba(0,255,255,0.2);
+}
+
+.btn-neon:active {
+    transform: scale(0.95);
+    background: var(--primary);
+    color: #000;
+    box-shadow: 0 0 20px var(--primary);
+}
+
+.btn-danger {
+    border-color: var(--danger);
+    color: var(--danger);
+    text-shadow: 0 0 5px var(--danger);
+    box-shadow: 0 0 10px rgba(255, 68, 68, 0.2);
+}
+
+.btn-danger:active {
+    background: var(--danger);
+    color: #fff;
+    box-shadow: 0 0 20px var(--danger);
+}
+
+/* MENUS */
+#main-menu, #game-over {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    background: radial-gradient(circle, rgba(0,20,40,0.8) 0%, rgba(0,5,10,0.95) 100%);
+    opacity: 0;
+    animation: fadeIn 0.5s forwards;
+}
+
+h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 4rem;
+    margin: 0;
+    background: linear-gradient(to bottom, #fff, var(--primary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 20px var(--primary));
+    text-align: center;
+}
+
+@keyframes fadeIn {
+    to { opacity: 1; }
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); box-shadow: 0 0 10px var(--secondary); }
+    50% { transform: scale(1.05); box-shadow: 0 0 20px var(--secondary); }
+    100% { transform: scale(1); box-shadow: 0 0 10px var(--secondary); }
+}
+
+/* EDITOR OVERLAY */
+#editor-overlay {
+    background: rgba(0, 0, 0, 0.4);
+    animation: fadeIn 0.3s forwards;
+    z-index: 2000; /* Ensure above Ad Space */
+}
+
+.editor-sidebar {
+    position: absolute;
+    top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    padding: 15px;
+    pointer-events: auto; /* Catch clicks */
+}
+
+.editor-sidebar.right { right: 20px; }
+.editor-sidebar.left { left: 20px; }
+
+.part-item {
+    width: 80px;
+    padding: 15px;
+    text-align: center;
+    border-radius: 12px;
+    cursor: grab;
+    transition: transform 0.2s;
+    font-weight: bold;
+    font-size: 0.9rem;
+    background: rgba(0, 20, 40, 0.8);
+    border: 1px solid rgba(255,255,255,0.1);
+    pointer-events: auto; /* Explicitly auto */
+}
+
+.part-item:active { cursor: grabbing; transform: scale(0.9); }
+
+.part-item[data-type="Fin"] { color: var(--primary); border-color: var(--primary); }
+.part-item[data-type="Spike"] { color: var(--danger); border-color: var(--danger); }
+.part-item[data-type="Eye"] { color: #fff; border-color: #fff; }
+
+.editor-controls {
+    position: absolute;
+    bottom: 80px; /* Raised above Ad Space (50px) */
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    pointer-events: none; /* Let clicks pass through gaps */
+}
+
+.editor-controls button {
+    pointer-events: auto;
+}
+
+/* HUD */
+#evolve-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    animation: pulse 2s infinite;
+    z-index: 90;
+    background: linear-gradient(45deg, var(--secondary), #aa00ff);
+    border: none;
+    color: white;
+    padding: 10px 25px;
+    border-radius: 20px;
+    font-family: 'Orbitron';
+    font-weight: bold;
+    box-shadow: 0 0 15px var(--secondary);
+    cursor: pointer;
+}
+
+/* AD SPACE */
+#ad-space {
+    border-top: 1px solid var(--primary);
+    box-shadow: 0 -5px 20px rgba(0,255,255,0.1);
+}
+
+/* UNLOCK CARD OVERLAY */
+#unlock-overlay {
+    perspective: 1000px;
+    background: rgba(0,0,0,0.9);
+}
+
+.unlock-card {
+    width: 250px;
+    height: 350px;
+    background: linear-gradient(135deg, #001, #003);
+    border: 2px solid var(--primary);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 50px var(--primary);
+    transform-style: preserve-3d;
+    animation: spinCard 2s ease-out forwards;
+    padding: 20px;
+    text-align: center;
+}
+
+.unlock-icon {
+    width: 100px;
+    height: 100px;
+    background: rgba(0,255,255,0.1);
+    border-radius: 50%;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    color: var(--primary);
+    box-shadow: inset 0 0 20px var(--primary);
+}
+
+@keyframes spinCard {
+    0% { transform: rotateY(720deg) scale(0); opacity: 0; }
+    80% { transform: rotateY(0deg) scale(1.1); opacity: 1; }
+    100% { transform: rotateY(0deg) scale(1); }
+}
+
+</style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    <script>
+
+// --- js/audio.js ---
+class AudioSystem {
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 0.5;
+        this.masterGain.connect(this.ctx.destination);
+
+        // Reverb / Echo
+        this.delay = this.ctx.createDelay();
+        this.delay.delayTime.value = 0.3; // 300ms echo
+        this.delayFeedback = this.ctx.createGain();
+        this.delayFeedback.gain.value = 0.4;
+        this.delayFilter = this.ctx.createBiquadFilter();
+        this.delayFilter.type = 'lowpass';
+        this.delayFilter.frequency.value = 1000; // Dampen echo
+
+        // Routing: Input -> Delay -> Feedback -> Input
+        this.delay.connect(this.delayFeedback);
+        this.delayFeedback.connect(this.delayFilter);
+        this.delayFilter.connect(this.delay);
+
+        // Connect Delay to Master (Wet Mix)
+        this.delay.connect(this.masterGain);
+
+        // Ambience
+        this.droneOsc = null;
+        this.startDrone();
+    }
+
+    startDrone() {
+        // Deep Sea Drone (Low sine + modulation)
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 50;
+
+        const mod = this.ctx.createOscillator();
+        mod.type = 'sine';
+        mod.frequency.value = 0.1; // Slow throb
+
+        const modGain = this.ctx.createGain();
+        modGain.gain.value = 10;
+
+        mod.connect(modGain);
+        modGain.connect(osc.frequency);
+
+        const gain = this.ctx.createGain();
+        gain.gain.value = 0.1; // Quiet
+
+        osc.connect(gain);
+        gain.connect(this.masterGain); // Direct to master, no reverb for clean bass
+
+        osc.start();
+        mod.start();
+
+        this.droneOsc = { osc, mod, gain };
+    }
+
+    playTone(freq, type, duration) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = type;
+        osc.frequency.value = freq;
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        gain.connect(this.delay); // Send to reverb
+
+        const now = this.ctx.currentTime;
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+        osc.start(now);
+        osc.stop(now + duration);
+    }
+
+    playEat() {
+        this.playTone(300 + Math.random() * 200, 'triangle', 0.1);
+        this.playTone(500 + Math.random() * 200, 'sine', 0.15);
+    }
+
+    playDash() {
+        // White noise burst for dash?
+        // Simple sweep
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.3);
+
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.3);
+    }
+}
+
+
+// --- js/physics.js ---
+class Physics {
+    constructor() {
+        this.gravity = 0;
+        this.friction = 0.90; // Decreased friction from 0.92 for more "glide"
+        this.elasticity = 0.5;
+    }
+
+    static createPoint(x, y, radius = 10, mass = 1) {
+        return {
+            x: x, y: y,
+            oldX: x, oldY: y,
+            vx: 0, vy: 0,
+            radius: radius,
+            mass: mass,
+            pinned: false
+        };
+    }
+
+    static createConstraint(p1, p2, stiffness = 0.1, length = null) {
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        return {
+            p1: p1,
+            p2: p2,
+            length: length !== null ? length : Math.hypot(dx, dy),
+            stiffness: stiffness
+        };
+    }
+
+    update(points, constraints, dt) {
+        for (let p of points) {
+            if (p.pinned) continue;
+            // Velocity Verlet
+            const vx = (p.x - p.oldX) * this.friction;
+            const vy = (p.y - p.oldY) * this.friction;
+            p.oldX = p.x;
+            p.oldY = p.y;
+            p.x += vx;
+            p.y += vy;
+            p.vx = vx;
+            p.vy = vy;
+        }
+
+        const iterations = 3; // Optimization: Reduced from 5
+        for (let i = 0; i < iterations; i++) {
+            for (let c of constraints) {
+                const dx = c.p2.x - c.p1.x;
+                const dy = c.p2.y - c.p1.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist === 0) continue;
+                const diff = (c.length - dist) / dist;
+                const offset = diff * c.stiffness * 0.5;
+                const offsetX = dx * offset;
+                const offsetY = dy * offset;
+                if (!c.p1.pinned) {
+                    c.p1.x -= offsetX;
+                    c.p1.y -= offsetY;
+                }
+                if (!c.p2.pinned) {
+                    c.p2.x += offsetX;
+                    c.p2.y += offsetY;
+                }
+            }
+        }
+    }
+
+    static checkSoftBodyCollision(body1Points, body2Points) {
+        let collision = false;
+
+        for (let p1 of body1Points) {
+            for (let p2 of body2Points) {
+                const dx = p1.x - p2.x;
+                const dy = p1.y - p2.y;
+                const dist = Math.hypot(dx, dy);
+                const minDist = p1.radius + p2.radius;
+
+                if (dist < minDist) {
+                    collision = true;
+                    const overlap = minDist - dist;
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+
+                    const force = overlap * 0.5;
+
+                    p1.x += nx * force;
+                    p1.y += ny * force;
+                    p2.x -= nx * force;
+                    p2.y -= ny * force;
+
+                    // Bounce
+                    const bounce = 0.8; // Higher bounce
+                    p1.oldX -= nx * bounce;
+                    p1.oldY -= ny * bounce;
+                    p2.oldX += nx * bounce;
+                    p2.oldY += ny * bounce;
+                }
+            }
+        }
+        return collision;
+    }
+}
+
+
+// --- js/stats.js ---
+class Stats {
+    constructor() {
+        this.baseSpeed = 1500;
+        this.baseDamage = 5;
+        this.baseDefense = 0;
+        this.baseTurnSpeed = 5;
+
+        // Calculated
+        this.speed = this.baseSpeed;
+        this.damage = this.baseDamage;
+        this.defense = this.baseDefense;
+        this.turnSpeed = this.baseTurnSpeed;
+    }
+
+    calculate(parts) {
+        let speedMod = 0;
+        let damageMod = 0;
+        let defenseMod = 0;
+        let turnMod = 0;
+
+        parts.forEach(part => {
+            switch(part.type) {
+                case 'Fin':
+                    speedMod += 200; // Force units
+                    turnMod += 1;
+                    break;
+                case 'Spike':
+                    damageMod += 10;
+                    defenseMod += 2; // Spikes hurt attacker
+                    break;
+                case 'Eye':
+                    // Zoom out view? Or just cosmetic for now?
+                    // Maybe 'Critical Hit Chance'
+                    break;
+                case 'Poison':
+                    damageMod += 5; // DoT logic later
+                    break;
+            }
+        });
+
+        this.speed = this.baseSpeed + speedMod;
+        this.damage = this.baseDamage + damageMod;
+        this.defense = this.baseDefense + defenseMod;
+        this.turnSpeed = this.baseTurnSpeed + turnMod;
+    }
+}
+
+
+// --- js/camera.js ---
+class Camera {
+    constructor(width, height) {
+        this.x = 0;
+        this.y = 0;
+        this.zoom = 1;
+        this.targetZoom = 1;
+
+        this.viewportWidth = width;
+        this.viewportHeight = height;
+
+        // Settings
+        this.followStrength = 0.05; // Lerp factor (lower = smoother/lazier)
+        this.lookAhead = 100; // How far to look ahead based on velocity
+        this.baseZoom = 1.0;
+    }
+
+    resize(w, h) {
+        this.viewportWidth = w;
+        this.viewportHeight = h;
+    }
+
+    update(targetX, targetY, targetVx, targetVy, dt, playerMass = 10) {
+        // 1. Calculate Target Position (Center on player + Lookahead)
+        const idealX = targetX + targetVx * 0.5; // Lookahead
+        const idealY = targetY + targetVy * 0.5;
+
+        // 2. Smoothly interpolate current camera position towards ideal
+        this.x += (idealX - this.x) * this.followStrength;
+        this.y += (idealY - this.y) * this.followStrength;
+
+        // 3. Zoom Logic (Dynamic based on Mass and Speed)
+        // Base scale inverse to mass
+        // Mass 10 -> Scale 1.0
+        // Mass 100 -> Scale 3.16 -> Zoom ~0.3
+
+        const playerScale = Math.sqrt(playerMass / 10);
+
+        // Target Zoom is inverse of player scale, but clamped
+        // Zoom out as player gets bigger to keep view consistent relative to player size
+        const massZoom = this.baseZoom / Math.max(1, playerScale * 0.8);
+
+        // Also zoom out slightly with speed
+        const speed = Math.hypot(targetVx, targetVy);
+        const speedFactor = Math.min(speed / 1000, 1);
+        const speedZoomMod = 1 - (speedFactor * 0.2);
+
+        this.targetZoom = massZoom * speedZoomMod;
+
+        // Clamp min zoom to avoid seeing edge of world if we had one (but world is infinite parallax)
+        this.targetZoom = Math.max(0.1, this.targetZoom);
+
+        this.zoom += (this.targetZoom - this.zoom) * 0.02; // Slow zoom
+    }
+
+    // Convert World Point to Screen Point
+    worldToScreen(wx, wy) {
+        return {
+            x: (wx - this.x) * this.zoom + this.viewportWidth / 2,
+            y: (wy - this.y) * this.zoom + this.viewportHeight / 2
+        };
+    }
+
+    // Convert Screen Point to World Point
+    screenToWorld(sx, sy) {
+        return {
+            x: (sx - this.viewportWidth / 2) / this.zoom + this.x,
+            y: (sy - this.viewportHeight / 2) / this.zoom + this.y
+        };
+    }
+
+    // Apply transform to Context
+    apply(ctx) {
+        ctx.save();
+        ctx.translate(this.viewportWidth / 2, this.viewportHeight / 2);
+        ctx.scale(this.zoom, this.zoom);
+        ctx.translate(-this.x, -this.y);
+    }
+
+    restore(ctx) {
+        ctx.restore();
+    }
+}
+
+
+// --- js/settings.js ---
+class Settings {
+    constructor() {
+        this.fxEnabled = true;
+        this.audioEnabled = true;
+        this.load();
+    }
+
+    load() {
+        const data = localStorage.getItem('jelly_settings');
+        if (data) {
+            const parsed = JSON.parse(data);
+            this.fxEnabled = parsed.fxEnabled;
+            this.audioEnabled = parsed.audioEnabled;
+        }
+    }
+
+    save() {
+        localStorage.setItem('jelly_settings', JSON.stringify({
+            fxEnabled: this.fxEnabled,
+            audioEnabled: this.audioEnabled
+        }));
+    }
+
+    toggleFX() {
+        this.fxEnabled = !this.fxEnabled;
+        this.save();
+        return this.fxEnabled;
+    }
+
+    toggleAudio() {
+        this.audioEnabled = !this.audioEnabled;
+        this.save();
+        return this.audioEnabled;
+    }
+}
+
+
+// --- js/assets.js ---
+class AssetGenerator {
+    constructor() {
+        this.cache = {};
+    }
+
+    get(key) {
+        if (!this.cache[key]) {
+            this.cache[key] = this.generate(key);
+        }
+        return this.cache[key];
+    }
+
+    generate(key) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        if (key === 'giant_worm') {
+            canvas.width = 500;
+            canvas.height = 200;
+            // Draw a segmented worm silhouette
+            ctx.fillStyle = 'rgba(20, 40, 60, 0.4)';
+            ctx.filter = 'blur(10px)'; // Blur once during generation
+
+            for (let i = 0; i < 10; i++) {
+                ctx.beginPath();
+                ctx.arc(50 + i * 40, 100, 40 - i * 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        else if (key === 'giant_jelly') {
+            canvas.width = 400;
+            canvas.height = 600;
+            ctx.fillStyle = 'rgba(30, 50, 70, 0.3)';
+            ctx.filter = 'blur(15px)';
+
+            // Head
+            ctx.beginPath();
+            ctx.arc(200, 150, 100, Math.PI, 0);
+            ctx.fill();
+
+            // Tentacles
+            ctx.lineWidth = 20;
+            ctx.strokeStyle = 'rgba(30, 50, 70, 0.2)';
+            for(let i=0; i<5; i++) {
+                ctx.beginPath();
+                ctx.moveTo(120 + i*40, 150);
+                ctx.quadraticCurveTo(120 + i*40 + (Math.random()-0.5)*50, 400, 120 + i*40, 550);
+                ctx.stroke();
+            }
+        }
+        else if (key === 'god_rays') {
+            canvas.width = 800;
+            canvas.height = 800;
+
+            // Radial Gradient Rays
+            const grad = ctx.createRadialGradient(400, 400, 0, 400, 400, 400);
+            grad.addColorStop(0, 'rgba(0, 255, 255, 0.05)');
+            grad.addColorStop(0.5, 'rgba(0, 200, 255, 0.02)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+            ctx.fillStyle = grad;
+            // Draw Star/Ray shape
+            for(let i=0; i<8; i++) {
+                ctx.save();
+                ctx.translate(400, 400);
+                ctx.rotate(i * (Math.PI / 4));
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(100, -400);
+                ctx.lineTo(-100, -400);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        return canvas;
+    }
+}
+
+
+// --- js/renderer.js ---
+class Renderer {
+    constructor(ctx, camera, settings) {
+        this.ctx = ctx;
+        this.camera = camera;
+        this.settings = settings;
+    }
+
+    drawCreature(creature, headAngle = 0) {
+        // Enable Additive Blending for "Bioluminescent" look if enabled
+        if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
+
+        const points = creature.points;
+        const color = creature.color || '#00ffff';
+
+        for (let i = points.length - 1; i >= 0; i--) {
+            const p = points[i];
+
+            // Glow
+            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2.5);
+            grad.addColorStop(0, color);
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+            this.ctx.fillStyle = grad;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.radius * 2.5, 0, Math.PI * 2);
+            this.ctx.fill();
+
+            // Core
+            this.ctx.fillStyle = 'white'; // White core for brightness
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.radius * 0.6, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        // Draw Attached Parts
+        if (creature.parts) {
+            creature.parts.forEach(part => {
+                const bone = creature.points[part.boneIndex];
+                if (!bone) return;
+
+                const prev = creature.points[part.boneIndex - 1] || creature.points[part.boneIndex + 1];
+                let spineAngle = 0;
+                if (prev) {
+                    spineAngle = Math.atan2(bone.y - prev.y, bone.x - prev.x);
+                    if (part.boneIndex === 0) spineAngle += Math.PI;
+                }
+
+                this.drawPart(part.type, bone.x, bone.y, spineAngle, part.side, bone.radius, color);
+            });
+        }
+
+        // Reset composite before drawing eyes (eyes should be solid)
+        this.ctx.globalCompositeOperation = 'source-over';
+
+        // Draw Eyes (Head)
+        const head = points[0];
+        const scale = head.radius / (head.baseRadius || 20);
+
+        this.ctx.save();
+        this.ctx.translate(head.x, head.y);
+        this.ctx.rotate(headAngle);
+        this.ctx.scale(scale, scale);
+
+        this.ctx.fillStyle = 'white';
+        this.ctx.beginPath();
+        this.ctx.arc(10, -8, 6, 0, Math.PI*2);
+        this.ctx.arc(10, 8, 6, 0, Math.PI*2);
+        this.ctx.fill();
+        this.ctx.fillStyle = 'black';
+        this.ctx.beginPath();
+        this.ctx.arc(13, -8, 3, 0, Math.PI*2);
+        this.ctx.arc(13, 8, 3, 0, Math.PI*2);
+        this.ctx.fill();
+        this.ctx.restore();
+    }
+
+    drawPart(type, x, y, spineAngle, side, radius, bodyColor) {
+        this.ctx.save();
+        this.ctx.translate(x, y);
+        this.ctx.rotate(spineAngle + (side === 1 ? Math.PI/2 : -Math.PI/2));
+
+        const wobble = Math.sin(Date.now() * 0.005) * 0.1;
+        this.ctx.rotate(wobble);
+
+        this.ctx.translate(radius, 0);
+
+        if (type === 'Fin') {
+            this.ctx.fillStyle = bodyColor;
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = bodyColor;
+                this.ctx.shadowBlur = 20;
+            }
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, 0);
+            this.ctx.quadraticCurveTo(15, -15, 40, 0);
+            this.ctx.quadraticCurveTo(15, 15, 0, 0);
+            this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+        } else if (type === 'Spike') {
+            this.ctx.fillStyle = '#ff0044';
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#f04';
+                this.ctx.shadowBlur = 15;
+            }
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, -8);
+            this.ctx.lineTo(35, 0);
+            this.ctx.lineTo(0, 8);
+            this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+        } else if (type === 'Eye') {
+             // Eyes drawn in main loop
+        }
+
+        this.ctx.restore();
+    }
+}
+
+
+// --- js/save_manager.js ---
+class SaveManager {
+    constructor(game) {
+        this.game = game;
+        this.key = 'jelly_evolution_save_v1';
+    }
+
+    save() {
+        const data = {
+            dna: this.game.creature.gameStats.dna,
+            mass: this.game.creature.gameStats.mass,
+            health: this.game.creature.gameStats.health,
+            maxHealth: this.game.creature.gameStats.maxHealth,
+            parts: this.game.creature.parts,
+            color: this.game.creature.color || '#00ffff' // Default color if not set
+        };
+        localStorage.setItem(this.key, JSON.stringify(data));
+        console.log("Game Saved", data);
+    }
+
+    load() {
+        const saved = localStorage.getItem(this.key);
+        if (saved) {
+            try {
+                const data = JSON.parse(saved);
+                this.game.creature.gameStats.dna = data.dna || 0;
+                this.game.creature.gameStats.mass = data.mass || 10;
+                this.game.creature.gameStats.health = data.health || 100;
+                this.game.creature.gameStats.maxHealth = data.maxHealth || 100;
+                this.game.creature.parts = data.parts || [];
+                this.game.creature.color = data.color || '#00ffff';
+
+                // Recalculate stats based on loaded parts
+                this.game.creature.stats.calculate(this.game.creature.parts);
+                console.log("Game Loaded", data);
+                return true;
+            } catch (e) {
+                console.error("Failed to load save", e);
+                return false;
+            }
+        }
+        return false;
+    }
+
+    reset() {
+        localStorage.removeItem(this.key);
+    }
+}
+
+
+// --- js/progression.js ---
+const PARTS_DB = {
+    'Fin': {
+        name: 'Fin',
+        desc: 'Increases Swim Speed and Turn Rate.',
+        stat: '+ Speed',
+        unlocked: true, // Default
+        cost: 5
+    },
+    'Spike': {
+        name: 'Spike',
+        desc: 'Deals damage on contact. Increases Defense.',
+        stat: '+ Damage',
+        unlocked: true, // Default
+        cost: 5
+    },
+    'Eye': {
+        name: 'Eye',
+        desc: 'Increases Field of View.',
+        stat: '+ Vision',
+        unlocked: true, // Default
+        cost: 5
+    },
+    'Tentacle': {
+        name: 'Tentacle',
+        desc: 'Wiggles and pushes enemies away.',
+        stat: '+ Control',
+        unlocked: false,
+        cost: 10
+    },
+    'Shield': {
+        name: 'Chitin Plate',
+        desc: 'Heavy armor that reduces incoming damage.',
+        stat: '++ Defense',
+        unlocked: false,
+        cost: 10
+    },
+    'Booster': {
+        name: 'Jet Gland',
+        desc: 'Burst of speed when moving forward.',
+        stat: '++ Speed',
+        unlocked: false,
+        cost: 15
+    },
+    'Poison': {
+        name: 'Toxin Sac',
+        desc: 'Enemies take damage over time after contact.',
+        stat: '+ Poison',
+        unlocked: false,
+        cost: 15
+    }
+};
+
+class Progression {
+    constructor(saveManager) {
+        this.saveManager = saveManager;
+        this.unlocked = ['Fin', 'Spike', 'Eye']; // Start with basics
+        this.load();
+    }
+
+    load() {
+        const saved = localStorage.getItem('jelly_unlocks');
+        if (saved) {
+            this.unlocked = JSON.parse(saved);
+        }
+        // Sync with DB
+        this.unlocked.forEach(key => {
+            if(PARTS_DB[key]) PARTS_DB[key].unlocked = true;
+        });
+    }
+
+    save() {
+        localStorage.setItem('jelly_unlocks', JSON.stringify(this.unlocked));
+    }
+
+    unlock(key) {
+        if (!this.unlocked.includes(key) && PARTS_DB[key]) {
+            this.unlocked.push(key);
+            PARTS_DB[key].unlocked = true;
+            this.save();
+            return true;
+        }
+        return false;
+    }
+
+    isUnlocked(key) {
+        return this.unlocked.includes(key);
+    }
+
+    getAvailableParts() {
+        return Object.keys(PARTS_DB).filter(k => this.unlocked.includes(k));
+    }
+
+    checkDrop(enemyType, difficulty) {
+        // Chance to unlock based on enemy
+        const chance = 0.3; // 30% drop chance
+        if (Math.random() > chance) return null;
+
+        // Determine potential drop based on difficulty/type
+        let potential = [];
+        if (difficulty > 2) potential.push('Tentacle');
+        if (difficulty > 4) potential.push('Shield');
+        if (difficulty > 6) potential.push('Booster');
+        if (difficulty > 8) potential.push('Poison');
+
+        // Filter out already unlocked
+        potential = potential.filter(p => !this.unlocked.includes(p));
+
+        if (potential.length > 0) {
+            const drop = potential[Math.floor(Math.random() * potential.length)];
+            return drop;
+        }
+        return null;
+    }
+}
+
+
+
+
+// --- js/input.js ---
+
+class Input {
+    constructor() {
+        this.active = false;
+        this.startX = 0;
+        this.startY = 0;
+        this.currX = 0;
+        this.currY = 0;
+        this.angle = 0;
+        this.distance = 0;
+        this.maxDistance = 50;
+
+        this.lastTap = 0;
+        this.doubleTapDetected = false;
+
+        this.setupListeners();
+    }
+
+    setupListeners() {
+        const target = window;
+
+        target.addEventListener('touchstart', (e) => {
+            if(e.target.tagName === 'CANVAS') e.preventDefault();
+            this.handleStart(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        target.addEventListener('touchmove', (e) => {
+            if(e.target.tagName === 'CANVAS') e.preventDefault();
+            this.handleMove(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        target.addEventListener('touchend', (e) => {
+            this.handleEnd();
+        });
+
+        target.addEventListener('mousedown', (e) => this.handleStart(e.clientX, e.clientY));
+        target.addEventListener('mousemove', (e) => this.handleMove(e.clientX, e.clientY));
+        target.addEventListener('mouseup', () => this.handleEnd());
+    }
+
+    handleStart(x, y) {
+        this.active = true;
+        this.startX = x;
+        this.startY = y;
+        this.currX = x;
+        this.currY = y;
+        this.distance = 0;
+
+        const now = Date.now();
+        if (now - this.lastTap < 300) {
+            this.doubleTapDetected = true;
+        }
+        this.lastTap = now;
+    }
+
+    handleMove(x, y) {
+        if (!this.active) return;
+        this.currX = x;
+        this.currY = y;
+        const dx = x - this.startX;
+        const dy = y - this.startY;
+        this.angle = Math.atan2(dy, dx);
+        this.distance = Math.min(Math.hypot(dx, dy), this.maxDistance);
+    }
+
+    handleEnd() {
+        this.active = false;
+        this.distance = 0;
+    }
+
+    getVector() {
+        if (!this.active) return { x: 0, y: 0 };
+        const force = this.distance / this.maxDistance;
+        return {
+            x: Math.cos(this.angle) * force,
+            y: Math.sin(this.angle) * force
+        };
+    }
+
+    checkDoubleTap() {
+        if (this.doubleTapDetected) {
+            this.doubleTapDetected = false;
+            return true;
+        }
+        return false;
+    }
+}
+
+
+// --- js/enemy.js ---
+
+
+class Enemy {
+    constructor(x, y, difficulty, physics) {
+        this.physics = physics;
+        this.active = true;
+        this.difficulty = difficulty; // 1 to 10+
+
+        // Procedural Generation
+        this.scale = 1 + (difficulty * 0.2); // Growth
+        this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
+
+        // Body
+        this.points = [];
+        this.constraints = [];
+        this.parts = [];
+
+        // Stats
+        this.stats = new Stats();
+        this.createBody(x, y);
+        this.generateParts();
+        this.stats.calculate(this.parts);
+
+        // Base stats scaling
+        this.stats.speed = 300 + difficulty * 50;
+        this.stats.damage = 5 + difficulty * 2;
+        this.health = 20 + difficulty * 10;
+        this.maxHealth = this.health;
+
+        // AI State
+        this.state = 'wander';
+        this.targetX = x;
+        this.targetY = y;
+        this.stateTimer = 0;
+    }
+
+    createBody(x, y) {
+        const segs = 3 + Math.floor(this.difficulty / 3);
+        const rad = 15 * this.scale;
+
+        for (let i = 0; i < segs; i++) {
+            const p = this.physics.constructor.createPoint(x, y + i * rad, rad * (1 - i*0.1), 1 + this.difficulty * 0.5);
+            p.baseRadius = rad * (1 - i*0.1);
+            this.points.push(p);
+
+            if (i > 0) {
+                const prev = this.points[i-1];
+                this.constraints.push(this.physics.constructor.createConstraint(prev, p, 0.5, rad));
+            }
+        }
+    }
+
+    generateParts() {
+        const partCount = Math.floor(this.difficulty);
+
+        for(let i=0; i<partCount; i++) {
+            const type = Math.random() > 0.5 ? 'Fin' : 'Spike';
+            const boneIndex = Math.floor(Math.random() * (this.points.length));
+            const side = Math.random() > 0.5 ? 1 : -1;
+
+            this.parts.push({ type, boneIndex, side });
+        }
+
+        if (Math.random() > 0.3) {
+             this.parts.push({ type: 'Eye', boneIndex: 0, side: 1 });
+             this.parts.push({ type: 'Eye', boneIndex: 0, side: -1 });
+        }
+    }
+
+    update(dt, playerHead) {
+        this.stateTimer -= dt;
+        if (this.stateTimer <= 0) this.pickState(playerHead);
+
+        // Steering
+        let head = this.points[0];
+        let dx = 0, dy = 0;
+        const distToPlayer = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
+
+        // Logic: if difficulty > player (proxy by scale?), chase.
+        // We don't know player stats here easily, so use distance or random behavior.
+        // Let's assume if dist < 400 * scale, react.
+
+        if (this.state === 'chase') {
+            dx = playerHead.x - head.x;
+            dy = playerHead.y - head.y;
+        } else if (this.state === 'flee') {
+            dx = head.x - playerHead.x;
+            dy = head.y - playerHead.y;
+        } else {
+            dx = this.targetX - head.x;
+            dy = this.targetY - head.y;
+            if (Math.hypot(dx, dy) < 50) this.pickState(playerHead);
+        }
+
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0) {
+            const force = this.stats.speed * dt * dt; // Apply as impulse
+            head.x += (dx / dist) * force;
+            head.y += (dy / dist) * force;
+        }
+
+        // Physics
+        this.physics.update(this.points, this.constraints, dt);
+    }
+
+    pickState(playerHead) {
+        this.stateTimer = Math.random() * 3 + 1;
+
+        const dist = Math.hypot(playerHead.x - this.points[0].x, playerHead.y - this.points[0].y);
+        if (dist < 400 * this.scale) {
+             // Aggressive if difficulty is high
+             if (this.difficulty > 3) this.state = 'chase';
+             else this.state = 'flee';
+        } else {
+            this.state = 'wander';
+            this.targetX = this.points[0].x + (Math.random()-0.5) * 500;
+            this.targetY = this.points[0].y + (Math.random()-0.5) * 500;
+        }
+    }
+
+    render(ctx) {
+        if (!this.active) return;
+
+        ctx.save();
+
+        // Body
+        for (let i = this.points.length - 1; i >= 0; i--) {
+            const p = this.points[i];
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+            ctx.fill();
+        }
+
+        // Parts
+        this.parts.forEach(part => {
+             const bone = this.points[part.boneIndex];
+             if(!bone) return;
+
+             ctx.save();
+             ctx.translate(bone.x, bone.y);
+
+             const prev = this.points[part.boneIndex-1] || this.points[part.boneIndex+1];
+             let ang = 0;
+             if (prev) {
+                 ang = Math.atan2(bone.y - prev.y, bone.x - prev.x);
+                 if (part.boneIndex === 0) ang += Math.PI;
+             }
+
+             ctx.rotate(ang + (part.side===1?Math.PI/2:-Math.PI/2));
+             ctx.translate(bone.radius, 0);
+
+             if(part.type === 'Fin') {
+                 ctx.fillStyle = '#fff';
+                 ctx.globalAlpha = 0.5;
+                 ctx.beginPath();
+                 ctx.moveTo(0,0); ctx.lineTo(15, -10); ctx.lineTo(30, 0);
+                 ctx.fill();
+             } else if (part.type === 'Spike') {
+                 ctx.fillStyle = '#f00';
+                 ctx.beginPath();
+                 ctx.moveTo(0, -5); ctx.lineTo(20, 0); ctx.lineTo(0, 5);
+                 ctx.fill();
+             } else if (part.type === 'Eye') {
+                 ctx.fillStyle = '#fff';
+                 ctx.beginPath();
+                 ctx.arc(5, 0, 4, 0, Math.PI*2);
+                 ctx.fill();
+                 ctx.fillStyle = '#000';
+                 ctx.beginPath();
+                 ctx.arc(6, 0, 2, 0, Math.PI*2);
+                 ctx.fill();
+             }
+             ctx.restore();
+        });
+
+        ctx.restore();
+    }
+}
+
+
+// --- js/editor.js ---
+
+
+
+class Editor {
+    constructor(game) {
+        this.game = game;
+        this.active = false;
+
+        // Editor State
+        this.selectedPart = null; // 'Fin', 'Spike', etc.
+        this.isDragging = false;
+        this.dragX = 0;
+        this.dragY = 0;
+
+        // Options
+        this.symmetry = false; // Mirror mode
+
+        // Setup UI immediately
+        setTimeout(() => this.setupUI(), 100);
+    }
+
+    setupUI() {
+        // Toggle Overlay
+        this.overlay = document.createElement('div');
+        this.overlay.id = 'editor-overlay';
+        this.overlay.style.position = 'absolute';
+        this.overlay.style.top = '0';
+        this.overlay.style.left = '0';
+        this.overlay.style.width = '100%';
+        this.overlay.style.height = '100%';
+        this.overlay.style.display = 'none';
+        this.overlay.style.pointerEvents = 'none'; // Let clicks pass to canvas if needed
+        this.overlay.style.zIndex = '2000'; // Ensure above Ad Space
+
+        // HTML Content with Classes
+        this.overlay.innerHTML = `
+            <div class="editor-controls">
+                <button id="add-vertebra-btn" class="btn-neon">+ BONE (10)</button>
+                <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem;">SYMMETRY: OFF</button>
+                <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; box-shadow:0 0 10px rgba(255,0,255,0.2);">PLAY</button>
+            </div>
+
+            <div class="editor-sidebar right" id="editor-parts-list" style="pointer-events: auto;">
+                <!-- Populated Dynamically -->
+            </div>
+
+            <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:'Orbitron'; font-size:1.5rem; text-shadow:0 0 10px #0ff;">
+                WORKBENCH <div id="editor-dna" style="font-size:0.8em; color:#fff; margin-top:5px;">DNA: 0</div>
+            </div>
+        `;
+        document.body.appendChild(this.overlay);
+
+        // Listeners
+        document.getElementById('close-editor-btn').addEventListener('click', () => this.toggle(false));
+        document.getElementById('add-vertebra-btn').addEventListener('click', () => this.addVertebra());
+        document.getElementById('toggle-mirror-btn').addEventListener('click', () => this.toggleSymmetry());
+
+        // Global Drag Listeners (Window)
+        window.addEventListener('mousemove', (e) => this.onDrag(e));
+        window.addEventListener('touchmove', (e) => this.onDrag(e), {passive: false});
+        window.addEventListener('mouseup', (e) => this.endDrag(e));
+        window.addEventListener('touchend', (e) => this.endDrag(e));
+
+        // Tap on canvas for selection (only when editor active)
+        this.game.canvas.addEventListener('mousedown', (e) => this.onCanvasClick(e));
+        this.game.canvas.addEventListener('touchstart', (e) => this.onCanvasClick(e), {passive: false});
+    }
+
+    refreshParts() {
+        const list = document.getElementById('editor-parts-list');
+        list.innerHTML = '';
+
+        const unlocked = this.game.progression.getAvailableParts();
+        unlocked.forEach(key => {
+            const part = PARTS_DB[key];
+            const div = document.createElement('div');
+            div.className = 'part-item';
+            div.dataset.type = key;
+            div.innerText = `${part.name} (${part.cost})`;
+            div.style.pointerEvents = 'auto'; // Ensure clickable
+            if (key === 'Eye') div.style.color = '#fff';
+
+            // Add Drag Listeners dynamically
+            div.addEventListener('mousedown', (e) => this.startDrag(e, key));
+            div.addEventListener('touchstart', (e) => this.startDrag(e, key), {passive: false});
+
+            list.appendChild(div);
+        });
+    }
+
+    toggle(active) {
+        this.active = active;
+        if (this.overlay) {
+            this.overlay.style.display = active ? 'block' : 'none';
+            if (active) {
+                this.updateDNA();
+                this.refreshParts();
+            } else {
+                this.hideResizeSlider();
+            }
+        }
+
+        if (active) {
+            // Zoom Camera to Creature
+            this.game.camera.targetZoom = 2.5;
+            this.game.input.active = false; // Disable movement
+        } else {
+            this.game.camera.targetZoom = 1.0;
+        }
+    }
+
+    toggleSymmetry() {
+        this.symmetry = !this.symmetry;
+        const btn = document.getElementById('toggle-mirror-btn');
+        btn.innerText = `SYMMETRY: ${this.symmetry ? 'ON' : 'OFF'}`;
+        btn.style.borderColor = this.symmetry ? '#0f0' : '#0ff';
+        btn.style.color = this.symmetry ? '#0f0' : '#0ff';
+    }
+
+    updateDNA() {
+        const el = document.getElementById('editor-dna');
+        if (el && this.game.creature) {
+            el.innerText = `DNA: ${Math.floor(this.game.creature.gameStats.dna)}`;
+        }
+    }
+
+    addVertebra() {
+        if (!this.game.creature) return;
+        if (this.game.creature.gameStats.dna < 10) return;
+
+        const points = this.game.creature.points;
+        if (points.length >= 20) return;
+
+        this.game.creature.gameStats.dna -= 10;
+        this.updateDNA();
+
+        const last = points[points.length-1];
+        const prev = points[points.length-2] || last;
+
+        // Calculate angle
+        const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+
+        // Create new Point
+        const newX = last.x + Math.cos(angle) * 20;
+        const newY = last.y + Math.sin(angle) * 20;
+
+        // Decrease radius slightly
+        const newRadius = Math.max(5, last.radius * 0.9);
+
+        const newP = Physics.createPoint(newX, newY, newRadius, 1);
+        newP.baseRadius = newRadius;
+
+        points.push(newP);
+
+        // New Constraint
+        const newC = Physics.createConstraint(last, newP, 0.3, 15);
+        newC.baseLength = 15;
+
+        this.game.creature.constraints.push(newC);
+    }
+
+    startDrag(e, type) {
+        // e.preventDefault();
+        this.isDragging = true;
+        this.selectedPart = type;
+        const pt = this.getEventPos(e);
+        this.dragX = pt.x;
+        this.dragY = pt.y;
+    }
+
+    onDrag(e) {
+        if (!this.isDragging) return;
+        // e.preventDefault();
+        const pt = this.getEventPos(e);
+        this.dragX = pt.x;
+        this.dragY = pt.y;
+    }
+
+    getClosestBone(pt) {
+        const cam = this.game.camera;
+        let closest = null;
+        let minDist = 50; // Snap radius in pixels (Screen Space)
+
+        this.game.creature.points.forEach((p, index) => {
+            const sp = cam.worldToScreen(p.x, p.y);
+            const dx = sp.x - pt.x;
+            const dy = sp.y - pt.y;
+            const d = Math.sqrt(dx*dx + dy*dy);
+
+            if (d < minDist) {
+                minDist = d;
+                closest = { point: p, index: index, sp: sp };
+            }
+        });
+        return closest;
+    }
+
+    endDrag(e) {
+        if (!this.isDragging) return;
+        this.isDragging = false;
+
+        const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
+
+        if (closest) {
+            const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
+
+            // Check DNA cost (account for symmetry double cost?)
+            let totalCost = cost;
+            if (this.symmetry && this.selectedPart !== 'Eye') totalCost *= 2;
+            // Eyes are special, usually placed in pairs on head, but let's allow single eyes or symmetry.
+            // Actually, if placing Eye on head (index 0), symmetry might mean two eyes.
+
+            if (this.game.creature.gameStats.dna < totalCost) {
+                // Feedback: Not enough DNA
+                alert("Not enough DNA!");
+                this.selectedPart = null;
+                return;
+            }
+
+            // Determine Side
+            const bone = closest.point;
+            const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1];
+
+            let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
+            if (closest.index === 0) {
+                 spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
+            }
+
+            const dropWorld = this.game.camera.screenToWorld(this.dragX, this.dragY);
+            const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
+            const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
+            const side = cross > 0 ? 1 : -1;
+
+            // Add Part
+            this.addPart(this.selectedPart, closest.index, side);
+
+            // Symmetry
+            if (this.symmetry) {
+                this.addPart(this.selectedPart, closest.index, -side);
+            }
+
+            this.game.creature.gameStats.dna -= totalCost;
+            this.updateDNA();
+            this.game.creature.stats.calculate(this.game.creature.parts);
+        }
+
+        this.selectedPart = null;
+    }
+
+    addPart(type, index, side) {
+        if (!this.game.creature.parts) this.game.creature.parts = [];
+        this.game.creature.parts.push({
+            type: type,
+            boneIndex: index,
+            side: side
+        });
+    }
+
+    getEventPos(e) {
+        if (e.touches && e.touches.length > 0) {
+            return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+        if (e.changedTouches && e.changedTouches.length > 0) {
+             return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+        }
+        return { x: e.clientX, y: e.clientY };
+    }
+
+    onCanvasClick(e) {
+        if (!this.active || this.isDragging) return;
+        if (e.target !== this.game.canvas) return;
+
+        const pt = this.getEventPos(e);
+        const cam = this.game.camera;
+
+        // Check Bone Selection
+        let clicked = null;
+        this.game.creature.points.forEach((p, index) => {
+            const sp = cam.worldToScreen(p.x, p.y);
+            const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
+            if (dist < p.radius * cam.zoom * 2) {
+                clicked = { p, index, sp };
+            }
+        });
+
+        if (clicked) {
+            this.selectedBone = clicked;
+            this.showResizeSlider(clicked);
+        } else {
+            // Click outside bone -> Close slider
+            this.selectedBone = null;
+            this.hideResizeSlider();
+        }
+    }
+
+    showResizeSlider(selection) {
+        let slider = document.getElementById('resize-slider-container');
+        if (!slider) {
+            slider = document.createElement('div');
+            slider.id = 'resize-slider-container';
+            slider.className = 'glass-panel';
+            slider.style = `position:absolute; width:150px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:5px; pointer-events:auto; z-index:2001;`;
+            slider.innerHTML = `
+                <div style="font-size:0.8rem; color:#fff;">SCALE</div>
+                <input type="range" id="bone-scale" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
+            `;
+            document.body.appendChild(slider);
+
+            document.getElementById('bone-scale').addEventListener('input', (e) => {
+                if (this.selectedBone) {
+                    const scale = parseFloat(e.target.value);
+                    if (!this.selectedBone.p.initialBaseRadius) this.selectedBone.p.initialBaseRadius = this.selectedBone.p.baseRadius;
+
+                    // Logic fixed: Slider left (0.5) -> Smaller. Right (1.5) -> Bigger.
+                    this.selectedBone.p.baseRadius = this.selectedBone.p.initialBaseRadius * scale;
+                    this.selectedBone.p.scaleFactor = scale;
+                }
+            });
+        }
+
+        // Position Slider near bone
+        slider.style.display = 'flex';
+        slider.style.left = `${selection.sp.x + 50}px`;
+        slider.style.top = `${selection.sp.y - 50}px`;
+
+        // Set value
+        const currentScale = selection.p.scaleFactor || 1.0;
+        document.getElementById('bone-scale').value = currentScale;
+    }
+
+    hideResizeSlider() {
+        const slider = document.getElementById('resize-slider-container');
+        if (slider) slider.style.display = 'none';
+    }
+
+    render(ctx) {
+        if (!this.active) return;
+
+        // Highlight Selected Bone
+        if (this.selectedBone) {
+            const cam = this.game.camera;
+            const p = this.selectedBone.p;
+            const sp = cam.worldToScreen(p.x, p.y);
+
+            // Update slider pos
+            const slider = document.getElementById('resize-slider-container');
+            if(slider && slider.style.display !== 'none') {
+                 slider.style.left = `${sp.x + 40}px`;
+                 slider.style.top = `${sp.y - 40}px`;
+            }
+
+            ctx.save();
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, p.radius * cam.zoom * 1.2 + 5, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Drag Logic
+        if (this.isDragging && this.selectedPart) {
+            // Magnet Preview logic
+            const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
+
+            if (closest) {
+                // Draw Ghost Part
+                const bone = closest.point;
+                const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1];
+                let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
+                if (closest.index === 0) spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
+
+                // Determine Side
+                const dropWorld = this.game.camera.screenToWorld(this.dragX, this.dragY);
+                const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
+                const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
+                const side = cross > 0 ? 1 : -1;
+
+                // Calculate Angle
+                const spineAngle = Math.atan2(spineVec.y, spineVec.x) + (closest.index===0 ? Math.PI : 0);
+
+                // Render Ghost
+                ctx.save();
+                ctx.globalAlpha = 0.5; // Ghostly
+                // We need to use Renderer's drawPart logic but projected to screen...
+                // Actually easier to set transform to bone screen pos and draw.
+                const sp = closest.sp;
+
+                ctx.translate(sp.x, sp.y);
+                // Rotate based on Camera + Spine
+                // Camera rotation is 0 always in this game
+                ctx.rotate(spineAngle + (side === 1 ? Math.PI/2 : -Math.PI/2));
+                ctx.translate(bone.radius * this.game.camera.zoom, 0); // Offset by radius scaled
+
+                ctx.fillStyle = '#0ff';
+                if(this.selectedPart === 'Spike') ctx.fillStyle = '#f00';
+
+                ctx.beginPath();
+                ctx.arc(0, 0, 10, 0, Math.PI*2); // Simple dot preview
+                ctx.fill();
+
+                // Draw Symmetry Ghost
+                if (this.symmetry) {
+                    ctx.save();
+                    ctx.translate(0, 0); // Reset local
+                    // It's hard to inverse exact transform here without full logic.
+                    // Simplified: just draw a dot on the other side?
+                    // Let's just stick to single ghost for now to avoid complexity bugs.
+                    ctx.restore();
+                }
+
+                ctx.restore();
+                ctx.globalAlpha = 1.0;
+            }
+
+            // Draw Icon under finger
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
+            ctx.shadowColor = '#0ff';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(this.dragX, this.dragY, 20, 0, Math.PI*2);
+            ctx.fill();
+
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Orbitron';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(this.selectedPart.toUpperCase(), this.dragX, this.dragY);
+            ctx.restore();
+        }
+    }
+}
+
+
+// --- js/gameloop.js ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+class GameLoop {
+    constructor() {
+        this.running = false;
+        this.lastTime = 0;
+        this.fps = 60;
+        this.step = 1 / this.fps;
+
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.width = 0;
+        this.height = 0;
+
+        this.input = new Input();
+        this.physics = new Physics();
+        this.camera = new Camera(window.innerWidth, window.innerHeight);
+        this.settings = new Settings();
+        this.audio = new AudioSystem();
+        this.renderer = new Renderer(this.ctx, this.camera, this.settings);
+
+        // --- JELLY CREATURE (Soft Body) ---
+        this.creature = {
+            points: [],
+            constraints: [],
+            parts: [],
+            stats: new Stats(),
+            gameStats: { dna: 0, mass: 10, health: 100, maxHealth: 100 },
+            color: '#00ffff'
+        };
+
+        this.saveManager = new SaveManager(this);
+        this.progression = new Progression(this.saveManager);
+        this.assets = new AssetGenerator();
+        this.headAngle = 0;
+        this.editor = new Editor(this);
+
+        // Ecosystem
+        this.bgAbyssal = [];
+        this.bgRays = { angle: 0 };
+        this.bgDeep = [];
+        this.bgMid = [];
+        this.bgFore = [];
+
+        this.enemies = [];
+        this.food = [];
+        this.particles = [];
+        this.hitstop = 0;
+        this.gameState = 'menu'; // menu, playing, gameover, paused
+
+        // UI Layers
+        this.createUI();
+        this.init();
+    }
+
+    createUI() {
+        // AD SPACE
+        const adSpace = document.createElement('div');
+        adSpace.id = 'ad-space';
+        adSpace.style = `position:absolute; bottom:0; left:0; width:100%; height:50px; background:rgba(0,0,0,0.8); display:flex; justify-content:center; align-items:center; z-index:1000; color:#444; font-family:Orbitron; pointer-events:none; border-top:1px solid #333;`;
+        adSpace.innerText = 'AD SPACE';
+        document.body.appendChild(adSpace);
+
+        // Main Menu
+        const menu = document.createElement('div');
+        menu.id = 'main-menu';
+        menu.innerHTML = `
+            <h1>NEON ABYSS</h1>
+            <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
+                <button id="play-btn" class="btn-neon">EVOLVE</button>
+                <button id="settings-btn" class="btn-neon" style="font-size:1rem; border-color:#888; color:#888;">SETTINGS</button>
+            </div>
+            <p style="margin-top:20px; font-size:0.8em; opacity:0.7;">Touch & Drag to Move</p>
+        `;
+        document.body.appendChild(menu);
+
+        // Settings Menu
+        const settingsMenu = document.createElement('div');
+        settingsMenu.id = 'settings-menu';
+        settingsMenu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:200; flex-direction:column; justify-content:center; align-items:center;';
+        settingsMenu.innerHTML = `
+            <h2 style="font-family:Orbitron; color:#0ff;">SETTINGS</h2>
+            <div style="display:flex; flex-direction:column; gap:15px;">
+                <button id="toggle-fx-btn" class="btn-neon">FX: ON</button>
+                <button id="toggle-audio-btn" class="btn-neon">AUDIO: ON</button>
+                <button id="reset-save-btn" class="btn-neon btn-danger">RESET SAVE</button>
+                <button id="back-btn" class="btn-neon" style="margin-top:20px;">BACK</button>
+            </div>
+        `;
+        document.body.appendChild(settingsMenu);
+
+        // Pause Menu
+        const pauseMenu = document.createElement('div');
+        pauseMenu.id = 'pause-menu';
+        pauseMenu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:200; flex-direction:column; justify-content:center; align-items:center;';
+        pauseMenu.innerHTML = `
+            <h2 style="font-family:Orbitron; color:#0ff;">PAUSED</h2>
+            <div style="display:flex; flex-direction:column; gap:15px;">
+                <button id="resume-btn" class="btn-neon">RESUME</button>
+                <button id="pause-fx-btn" class="btn-neon">FX: ON</button>
+                <button id="pause-audio-btn" class="btn-neon">AUDIO: ON</button>
+                <button id="quit-btn" class="btn-neon btn-danger">MAIN MENU</button>
+            </div>
+        `;
+        document.body.appendChild(pauseMenu);
+
+        // Game Over Screen
+        const gameOver = document.createElement('div');
+        gameOver.id = 'game-over';
+        gameOver.style = 'display:none';
+        gameOver.innerHTML = `
+            <h1 style="color:var(--danger); text-shadow:0 0 20px var(--danger);">EXTINCT</h1>
+            <div style="margin-top:20px;">
+                <button id="respawn-btn" class="btn-neon btn-danger">REBIRTH</button>
+            </div>
+        `;
+        document.body.appendChild(gameOver);
+
+        // Unlock Overlay
+        const unlockOverlay = document.createElement('div');
+        unlockOverlay.id = 'unlock-overlay';
+        unlockOverlay.style = `display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:500; align-items:center; justify-content:center;`;
+        document.body.appendChild(unlockOverlay);
+
+        // HUD
+        const hud = document.createElement('div');
+        hud.id = 'game-hud';
+        hud.style = `position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:90;`;
+        hud.innerHTML = `
+            <button id="pause-trigger-btn" style="position:absolute; top:20px; left:20px; pointer-events:auto; background:rgba(0,0,0,0.5); border:1px solid #0ff; color:#0ff; border-radius:50%; width:40px; height:40px; font-weight:bold; cursor:pointer;">II</button>
+            <button id="evolve-btn" style="display:none; position:absolute; top:20px; right:20px; pointer-events:auto; padding:10px 20px; background:linear-gradient(45deg, #f0f, #00f); border:none; border-radius:20px; font-family:Orbitron; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 10px #f0f;">EVOLVE (10 DNA)</button>
+        `;
+        document.body.appendChild(hud);
+
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        document.getElementById('play-btn').onclick = () => this.startGame();
+        document.getElementById('settings-btn').onclick = () => {
+            document.getElementById('main-menu').style.display = 'none';
+            document.getElementById('settings-menu').style.display = 'flex';
+            this.updateSettingsButtons();
+        };
+        document.getElementById('back-btn').onclick = () => {
+            document.getElementById('settings-menu').style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+        };
+        document.getElementById('reset-save-btn').onclick = () => {
+            if(confirm('Reset all progress?')) {
+                this.saveManager.reset();
+                location.reload();
+            }
+        };
+        document.getElementById('toggle-fx-btn').onclick = () => this.toggleFX();
+        document.getElementById('toggle-audio-btn').onclick = () => this.toggleAudio();
+        document.getElementById('pause-trigger-btn').onclick = () => this.pauseGame();
+        document.getElementById('respawn-btn').onclick = () => this.respawn();
+        document.getElementById('evolve-btn').onclick = () => {
+            this.editor.toggle(true);
+            document.getElementById('evolve-btn').style.display = 'none';
+        };
+        document.getElementById('resume-btn').onclick = () => this.resumeGame();
+        document.getElementById('quit-btn').onclick = () => {
+            document.getElementById('pause-menu').style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+            document.getElementById('game-hud').style.display = 'none';
+            this.gameState = 'menu';
+        };
+        document.getElementById('pause-fx-btn').onclick = () => this.toggleFX();
+        document.getElementById('pause-audio-btn').onclick = () => this.toggleAudio();
+
+        // Unlock Card Click to continue
+        document.getElementById('unlock-overlay').onclick = () => {
+            document.getElementById('unlock-overlay').style.display = 'none';
+            this.resumeGame();
+        };
+    }
+
+    triggerUnlock(partKey) {
+        if (this.progression.unlock(partKey)) {
+            this.pauseGame(true); // True = Unlock Mode
+            const overlay = document.getElementById('unlock-overlay');
+            const part = PARTS_DB[partKey];
+            overlay.innerHTML = `
+                <div class="unlock-card">
+                    <h2 style="color:#0ff; margin-bottom:10px;">EVOLUTION UNLOCKED</h2>
+                    <div class="unlock-icon">${partKey[0]}</div>
+                    <h1 style="font-size:2rem; margin:10px 0;">${part.name}</h1>
+                    <p style="color:#aaa; font-size:0.9rem;">${part.desc}</p>
+                    <div style="margin-top:20px; color:#0f0; font-weight:bold;">${part.stat}</div>
+                    <div style="margin-top:20px; font-size:0.8rem; animation:pulse 1s infinite;">TAP TO CONTINUE</div>
+                </div>
+            `;
+            overlay.style.display = 'flex';
+            if (this.settings.audioEnabled) this.audio.playTone(400, 'sine', 0.5); // Victory sound
+        }
+    }
+
+    toggleFX() {
+        const state = this.settings.toggleFX();
+        this.updateSettingsButtons();
+    }
+
+    toggleAudio() {
+        const state = this.settings.toggleAudio();
+        this.updateSettingsButtons();
+        if(state) this.audio.ctx.resume();
+        else this.audio.ctx.suspend();
+    }
+
+    updateSettingsButtons() {
+        const fxText = `FX: ${this.settings.fxEnabled ? 'ON' : 'OFF'}`;
+        const audioText = `AUDIO: ${this.settings.audioEnabled ? 'ON' : 'OFF'}`;
+
+        document.getElementById('toggle-fx-btn').innerText = fxText;
+        document.getElementById('toggle-audio-btn').innerText = audioText;
+        document.getElementById('pause-fx-btn').innerText = fxText;
+        document.getElementById('pause-audio-btn').innerText = audioText;
+    }
+
+    pauseGame(isUnlock = false) {
+        if (this.gameState === 'playing') {
+            this.gameState = 'paused';
+            if (!isUnlock) {
+                document.getElementById('pause-menu').style.display = 'flex';
+                this.updateSettingsButtons();
+            }
+        }
+    }
+
+    resumeGame() {
+        if (this.gameState === 'paused') {
+            this.gameState = 'playing';
+            document.getElementById('pause-menu').style.display = 'none';
+        }
+    }
+
+    startGame() {
+        document.getElementById('main-menu').style.display = 'none';
+        document.getElementById('game-hud').style.display = 'block';
+        this.gameState = 'playing';
+        if (this.settings.audioEnabled) this.audio.ctx.resume();
+    }
+
+    init() {
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+        this.resetCreature();
+        this.saveManager.load();
+        this.initBackground();
+        this.spawnEnemies();
+        this.spawnFood(50);
+        document.getElementById('game-hud').style.display = 'none';
+        this.start();
+        setInterval(() => {
+            if (this.gameState === 'playing') this.saveManager.save();
+        }, 30000);
+    }
+
+    resetCreature() {
+        this.creature.points = [];
+        this.creature.constraints = [];
+        this.creature.gameStats = this.creature.gameStats || { dna: 0, mass: 10, health: 100, maxHealth: 100 };
+        this.headAngle = 0;
+
+        const spineLength = 12;
+        const startX = 0;
+        const startY = 0;
+
+        for (let i = 0; i < spineLength; i++) {
+            const baseRad = 20 - i * 1.2;
+            const p = Physics.createPoint(startX, startY + i * 20, baseRad, 1);
+            p.baseRadius = baseRad;
+            this.creature.points.push(p);
+
+            if (i > 0) {
+                const prev = this.creature.points[i - 1];
+                const link = Physics.createConstraint(prev, p, 0.3, 15);
+                link.baseLength = 15;
+                this.creature.constraints.push(link);
+            }
+        }
+        this.creature.stats.calculate(this.creature.parts);
+    }
+
+    respawn() {
+        document.getElementById('game-over').style.display = 'none';
+        this.creature.gameStats.health = this.creature.gameStats.maxHealth;
+        this.creature.gameStats.mass = Math.max(10, this.creature.gameStats.mass * 0.5);
+        this.saveManager.save();
+        this.resetCreature();
+        this.camera.x = 0;
+        this.camera.y = 0;
+        this.gameState = 'playing';
+    }
+
+    resize() {
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        const adHeight = 50;
+        this.height -= adHeight;
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+        this.camera.resize(this.width, this.height);
+    }
+
+    spawnFood(count) {
+        for(let i=0; i<count; i++) {
+            this.food.push({
+                x: (Math.random()-0.5)*3000,
+                y: (Math.random()-0.5)*3000,
+                radius: 5,
+                color: '#0f0'
+            });
+        }
+    }
+
+    spawnMeat(x, y, count) {
+        for(let i=0; i<count; i++) {
+            this.food.push({
+                x: x + (Math.random()-0.5)*50,
+                y: y + (Math.random()-0.5)*50,
+                radius: 8,
+                color: '#ff4444',
+                type: 'meat',
+                dnaValue: 5
+            });
+        }
+    }
+
+    spawnEnemies() {
+        const targetCount = 6;
+        if (this.enemies.length >= targetCount) return;
+        const count = targetCount - this.enemies.length;
+        const playerScale = Math.sqrt(this.creature.gameStats.mass / 10);
+        const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
+        const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
+        for(let i=0; i<count; i++) {
+            const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 1000 + Math.random() * 1000;
+            const ex = playerX + Math.cos(angle) * dist;
+            const ey = playerY + Math.sin(angle) * dist;
+            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics));
+        }
+    }
+
+    initBackground() {
+        this.bgAbyssal = []; this.bgDeep = []; this.bgMid = []; this.bgFore = [];
+
+        // AAA Optimization: Use Pre-rendered Sprites
+        for(let i=0; i<6; i++) {
+            this.bgAbyssal.push({
+                type: i % 2 === 0 ? 'giant_worm' : 'giant_jelly',
+                x: (Math.random() - 0.5) * 8000,
+                y: (Math.random() - 0.5) * 8000,
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 5,
+                scale: 2 + Math.random() * 2,
+                angle: Math.random() * Math.PI * 2
+            });
+        }
+
+        for(let i=0; i<100; i++) this.bgDeep.push({ x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 6000, r: Math.random() * 4 + 2, alpha: Math.random() * 0.2 });
+        for(let i=0; i<200; i++) this.bgMid.push({ x: (Math.random() - 0.5) * 4000, y: (Math.random() - 0.5) * 4000, r: Math.random() * 3, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, alpha: Math.random() * 0.3 });
+        for(let i=0; i<50; i++) this.bgFore.push({ x: (Math.random() - 0.5) * 3000, y: (Math.random() - 0.5) * 3000, r: Math.random() * 2, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, alpha: Math.random() * 0.5 + 0.2 });
+    }
+
+    start() {
+        if (!this.running) {
+            this.running = true;
+            this.lastTime = performance.now();
+            requestAnimationFrame((t) => this.loop(t));
+        }
+    }
+
+    loop(timestamp) {
+        if (!this.running) return;
+        let dt = (timestamp - this.lastTime) / 1000;
+        if (dt > 0.1) dt = 0.1;
+        this.lastTime = timestamp;
+
+        if (this.hitstop > 0) {
+            this.hitstop -= dt;
+            this.render();
+            requestAnimationFrame((t) => this.loop(t));
+            return;
+        }
+
+        if (this.gameState === 'playing') {
+            this.update(dt);
+        } else if (this.gameState === 'menu') {
+            this.updateBackgroundOnly(dt);
+        }
+
+        this.render();
+        requestAnimationFrame((t) => this.loop(t));
+    }
+
+    updateBackgroundOnly(dt) {
+        this.bgRays.angle += dt * 0.05;
+        this.bgAbyssal.forEach(g => { g.x += g.vx * dt; g.y += g.vy * dt; g.angle += dt * 0.01; });
+        this.bgMid.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
+        this.bgFore.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
+    }
+
+    update(dt) {
+        if (this.editor.active) {
+            this.physics.update(this.creature.points, this.creature.constraints, dt * 0.1);
+            const head = this.creature.points[0];
+            this.camera.update(head.x, head.y, 0, 0, dt, this.creature.gameStats.mass);
+            return;
+        }
+
+        if (this.creature.gameStats.health <= 0) {
+            this.gameState = 'gameover';
+            document.getElementById('game-over').style.display = 'flex';
+            document.getElementById('game-hud').style.display = 'none';
+            return;
+        }
+
+        const scale = Math.sqrt(this.creature.gameStats.mass / 10);
+        this.creature.points.forEach(p => { if(p.baseRadius) p.radius = p.baseRadius * scale; });
+        this.creature.constraints.forEach(c => { if(c.baseLength) c.length = c.baseLength * scale; });
+
+        const head = this.creature.points[0];
+        const inputVec = this.input.getVector();
+        const swimForce = (this.creature.stats.speed + 1000) * scale;
+        const turnSpeed = this.creature.stats.turnSpeed * 2.0;
+
+        if (this.input.active) {
+            head.x += inputVec.x * swimForce * dt * dt;
+            head.y += inputVec.y * swimForce * dt * dt;
+            let targetAngle = Math.atan2(inputVec.y, inputVec.x);
+            let diff = targetAngle - this.headAngle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            this.headAngle += diff * turnSpeed * dt;
+        }
+
+        // Dash Ability (Double Tap)
+        if (this.input.checkDoubleTap()) {
+            // Check if unlocked
+            if (this.progression.isUnlocked('Booster')) {
+                // Apply impulse
+                const dashForce = 5000 * scale;
+                head.x += Math.cos(this.headAngle) * dashForce * dt;
+                head.y += Math.sin(this.headAngle) * dashForce * dt;
+
+                this.spawnParticles(head.x, head.y, '#fff', 20, 300);
+                if(this.settings.audioEnabled) this.audio.playDash();
+            }
+        }
+
+        this.physics.update(this.creature.points, this.creature.constraints, dt);
+        this.updateBackgroundOnly(dt);
+        this.spawnEnemies();
+
+        const playerRadius = head.radius;
+        for (let i = this.enemies.length - 1; i >= 0; i--) {
+            const e = this.enemies[i];
+            e.update(dt, head, playerRadius);
+            const collision = Physics.checkSoftBodyCollision(this.creature.points, e.points);
+            if (collision) {
+                const enemyDmg = e.stats.damage;
+                this.creature.gameStats.health -= Math.max(0, enemyDmg - this.creature.stats.defense);
+                e.health -= Math.max(0, this.creature.stats.damage);
+                const mx = (head.x + e.points[0].x) / 2;
+                const my = (head.y + e.points[0].y) / 2;
+                this.hitstop = 0.05;
+                this.spawnParticles(mx, my, '#ff0044', 5, 200);
+                if (e.health <= 0) {
+                     this.spawnParticles(mx, my, '#ffaa00', 20, 400);
+                     this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
+
+                     // Check Drop
+                     const drop = this.progression.checkDrop(null, e.difficulty);
+                     if (drop) this.triggerUnlock(drop);
+
+                     this.enemies.splice(i, 1);
+                     continue;
+                }
+                this.camera.x += (Math.random()-0.5) * 10;
+                this.camera.y += (Math.random()-0.5) * 10;
+                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1);
+            }
+            const dist = Math.hypot(head.x - e.points[0].x, head.y - e.points[0].y);
+            if (dist > 3000) this.enemies.splice(i, 1);
+        }
+
+        for (let i = this.food.length - 1; i >= 0; i--) {
+            const f = this.food[i];
+            const dist = Math.hypot(head.x - f.x, head.y - f.y);
+            if (dist < head.radius + f.radius) {
+                this.food.splice(i, 1);
+                const dnaValue = f.dnaValue || 1;
+                this.creature.gameStats.dna += dnaValue;
+                this.creature.gameStats.mass += 0.5 * dnaValue;
+                this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
+                if(this.settings.audioEnabled) this.audio.playEat();
+                this.spawnParticles(f.x, f.y, f.color, 5, 100);
+                if (f.type !== 'meat') {
+                     this.food.push({ x: head.x + (Math.random()-0.5)*1000, y: head.y + (Math.random()-0.5)*1000, radius: 5, color: '#0f0' });
+                }
+            }
+        }
+
+        if (this.creature.gameStats.dna >= 10 && !this.editor.active) {
+            const btn = document.getElementById('evolve-btn');
+            if (btn && btn.style.display === 'none') btn.style.display = 'block';
+        }
+
+        this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
+    }
+
+    spawnParticles(x, y, color, count, speedVar = 100) {
+        // Optimization: Cap particles
+        if (this.particles.length > 50) return;
+
+        for(let i=0; i<count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * speedVar;
+            this.particles.push({ x: x, y: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.3 + Math.random() * 0.2, color: color, radius: Math.random() * 4 + 1 });
+        }
+    }
+
+    render() {
+        const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
+        bgGrad.addColorStop(0, '#000510'); bgGrad.addColorStop(1, '#001020');
+        this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // --- LAYER 0: GOD RAYS (Parallax 0.0) ---
+        if (this.settings.fxEnabled) {
+            const rays = this.assets.get('god_rays');
+            this.ctx.save();
+            this.ctx.translate(this.width/2, this.height/2);
+            this.ctx.rotate(this.bgRays.angle);
+            this.ctx.scale(3, 3);
+            this.ctx.translate(-400, -400); // Center image
+            this.ctx.drawImage(rays, 0, 0);
+            this.ctx.restore();
+        }
+
+        // --- LAYER 1: ABYSSAL GIANTS (Parallax 0.05) ---
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
+
+        this.bgAbyssal.forEach(g => {
+            const sprite = this.assets.get(g.type);
+            this.ctx.save();
+            this.ctx.translate(g.x, g.y);
+            this.ctx.rotate(g.angle);
+            this.ctx.scale(g.scale, g.scale);
+            this.ctx.drawImage(sprite, -sprite.width/2, -sprite.height/2);
+            this.ctx.restore();
+        });
+        this.ctx.restore();
+
+        // --- LAYER 2: DEEP PARTICLES (Parallax 0.1) ---
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.1, -this.camera.y * 0.1);
+        this.ctx.fillStyle = '#fff';
+        this.bgDeep.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
+        this.ctx.restore();
+
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.5, -this.camera.y * 0.5);
+        this.ctx.fillStyle = '#aaffff';
+        this.bgMid.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
+        this.ctx.restore();
+
+        this.camera.apply(this.ctx);
+        this.ctx.globalAlpha = 1.0;
+
+        if(this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
+        this.food.forEach(f => {
+            this.ctx.fillStyle = f.color;
+            if(this.settings.fxEnabled) { this.ctx.shadowColor = f.color; this.ctx.shadowBlur = 10; }
+            this.ctx.beginPath(); this.ctx.arc(f.x, f.y, f.radius, 0, Math.PI*2); this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+        });
+        this.ctx.globalCompositeOperation = 'source-over';
+
+        this.particles.forEach(p => { this.ctx.globalAlpha = p.life * 2; this.ctx.fillStyle = p.color; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); this.ctx.fill(); });
+        this.ctx.globalAlpha = 1.0;
+
+        this.enemies.forEach(e => e.render(this.ctx));
+
+        if (this.gameState === 'playing' || this.gameState === 'paused') {
+            this.renderer.drawCreature(this.creature, this.headAngle);
+            const head = this.creature.points[0];
+            const scale = head.radius / head.baseRadius;
+            this.ctx.fillStyle = '#333';
+            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale, 5 * scale);
+            this.ctx.fillStyle = this.creature.gameStats.health < 20 ? '#f00' : '#0f0';
+            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale * (Math.max(0, this.creature.gameStats.health) / 100), 5 * scale);
+        }
+
+        this.camera.restore(this.ctx);
+
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 1.5, -this.camera.y * 1.5);
+        this.ctx.fillStyle = '#ffffff';
+        this.bgFore.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
+        this.ctx.restore();
+        this.ctx.globalAlpha = 1.0;
+
+        if (this.input.active && !this.editor.active && this.gameState === 'playing') {
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.arc(this.input.startX, this.input.startY, 50, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
+            this.ctx.beginPath();
+            this.ctx.arc(this.input.currX, this.input.currY, 20, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        this.editor.render(this.ctx);
+    }
+}
+
+window.game = new GameLoop();
+
+
+</script>
+</body>
+</html>
