@@ -1,7 +1,7 @@
 export default class Physics {
     constructor() {
         this.gravity = 0;
-        this.friction = 0.92;
+        this.friction = 0.90; // Decreased friction from 0.92 for more "glide"
         this.elasticity = 0.5;
     }
 
@@ -30,6 +30,7 @@ export default class Physics {
     update(points, constraints, dt) {
         for (let p of points) {
             if (p.pinned) continue;
+            // Velocity Verlet
             const vx = (p.x - p.oldX) * this.friction;
             const vy = (p.y - p.oldY) * this.friction;
             p.oldX = p.x;
@@ -63,13 +64,9 @@ export default class Physics {
         }
     }
 
-    // --- COMBAT COLLISIONS ---
-
-    // Check overlap between two sets of soft-body points
     static checkSoftBodyCollision(body1Points, body2Points) {
         let collision = false;
 
-        // Naive O(N*M) check (Fine for small creatures)
         for (let p1 of body1Points) {
             for (let p2 of body2Points) {
                 const dx = p1.x - p2.x;
@@ -79,21 +76,19 @@ export default class Physics {
 
                 if (dist < minDist) {
                     collision = true;
-                    // Resolve overlap (Push apart)
                     const overlap = minDist - dist;
                     const nx = dx / dist;
                     const ny = dy / dist;
 
-                    const force = overlap * 0.5; // Split
+                    const force = overlap * 0.5;
 
                     p1.x += nx * force;
                     p1.y += ny * force;
                     p2.x -= nx * force;
                     p2.y -= ny * force;
 
-                    // Add Impulse (Bounce)
-                    // Modify old positions to create velocity change
-                    const bounce = 0.5;
+                    // Bounce
+                    const bounce = 0.8; // Higher bounce
                     p1.oldX -= nx * bounce;
                     p1.oldY -= ny * bounce;
                     p2.oldX += nx * bounce;

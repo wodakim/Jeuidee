@@ -42,43 +42,94 @@ class GameLoop {
         this.food = [];
         this.particles = [];
         this.hitstop = 0;
+        this.gameState = 'menu'; // menu, playing, gameover
 
+        // UI Layers
+        this.createUI();
         this.init();
+    }
+
+    createUI() {
+        // Main Menu
+        const menu = document.createElement('div');
+        menu.id = 'main-menu';
+        menu.style = `position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,16,0.9); display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:100; pointer-events:auto; font-family:Orbitron; color:#0ff;`;
+        menu.innerHTML = `
+            <h1 style="font-size:3em; text-shadow:0 0 20px #0ff;">NEON ABYSS</h1>
+            <div style="margin-top:20px;">
+                <button id="play-btn" style="padding:15px 40px; background:linear-gradient(45deg, #0ff, #00f); border:none; border-radius:30px; font-size:1.5em; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 15px #0ff;">EVOLVE</button>
+            </div>
+            <p style="margin-top:20px; font-size:0.8em; opacity:0.7;">Touch & Drag to Move</p>
+        `;
+        document.body.appendChild(menu);
+
+        // Game Over Screen
+        const gameOver = document.createElement('div');
+        gameOver.id = 'game-over';
+        gameOver.style = `position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(20,0,0,0.9); display:none; flex-direction:column; justify-content:center; align-items:center; z-index:100; pointer-events:auto; font-family:Orbitron; color:#f00;`;
+        gameOver.innerHTML = `
+            <h1 style="font-size:3em; text-shadow:0 0 20px #f00;">EXTINCT</h1>
+            <div style="margin-top:20px;">
+                <button id="respawn-btn" style="padding:15px 40px; background:linear-gradient(45deg, #f00, #500); border:none; border-radius:30px; font-size:1.5em; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 15px #f00;">REBIRTH</button>
+            </div>
+        `;
+        document.body.appendChild(gameOver);
+
+        document.getElementById('play-btn').onclick = () => this.startGame();
+        document.getElementById('respawn-btn').onclick = () => this.respawn();
     }
 
     init() {
         this.resize();
         window.addEventListener('resize', () => this.resize());
-
-        // Base Spine
-        const spineLength = 12;
-        const startX = 0;
-        const startY = 0;
-
-        for (let i = 0; i < spineLength; i++) {
-            // Radius scales with Mass
-            const baseRad = 20 - i * 1.2;
-            const p = Physics.createPoint(startX, startY + i * 20, baseRad, 1);
-            // Store base radius for scaling
-            p.baseRadius = baseRad;
-            this.creature.points.push(p);
-
-            if (i > 0) {
-                const prev = this.creature.points[i - 1];
-                const link = Physics.createConstraint(prev, p, 0.3, 15);
-                // Store base length
-                link.baseLength = 15;
-                this.creature.constraints.push(link);
-            }
-        }
-
-        this.creature.stats.calculate(this.creature.parts);
+        this.resetCreature();
         this.initBackground();
         this.spawnEnemies();
         this.spawnFood(50);
         this.start();
     }
 
+    resetCreature() {
+        this.creature.points = [];
+        this.creature.constraints = [];
+        this.creature.gameStats = { dna: 0, mass: 10, health: 100, maxHealth: 100 };
+        this.headAngle = 0;
+
+        const spineLength = 12;
+        const startX = 0;
+        const startY = 0;
+
+        for (let i = 0; i < spineLength; i++) {
+            const baseRad = 20 - i * 1.2;
+            const p = Physics.createPoint(startX, startY + i * 20, baseRad, 1);
+            p.baseRadius = baseRad;
+            this.creature.points.push(p);
+
+            if (i > 0) {
+                const prev = this.creature.points[i - 1];
+                const link = Physics.createConstraint(prev, p, 0.3, 15);
+                link.baseLength = 15;
+                this.creature.constraints.push(link);
+            }
+        }
+        this.creature.stats.calculate(this.creature.parts);
+    }
+
+    startGame() {
+        document.getElementById('main-menu').style.display = 'none';
+        this.gameState = 'playing';
+        this.audio.ctx.resume();
+    }
+
+    respawn() {
+        document.getElementById('game-over').style.display = 'none';
+        this.resetCreature();
+        this.camera.x = 0;
+        this.camera.y = 0;
+        this.gameState = 'playing';
+    }
+
+    // ... (Spawn functions same as before)
     spawnFood(count) {
         for(let i=0; i<count; i++) {
             this.food.push({
@@ -91,6 +142,7 @@ class GameLoop {
     }
 
     spawnEnemies() {
+        this.enemies = []; // Reset
         for(let i=0; i<5; i++) {
             this.enemies.push(new Enemy((Math.random()-0.5)*1000, (Math.random()-0.5)*1000, 'grazer', this.physics));
         }
@@ -98,6 +150,8 @@ class GameLoop {
     }
 
     initBackground() {
+        this.bgDeep = [];
+        this.bgMid = [];
         for(let i=0; i<50; i++) {
             this.bgDeep.push({
                 x: (Math.random() - 0.5) * 5000,
@@ -148,10 +202,23 @@ class GameLoop {
             return;
         }
 
-        this.update(dt);
-        this.render();
+        if (this.gameState === 'playing') {
+            this.update(dt);
+        } else if (this.gameState === 'menu') {
+            // Background Animation?
+            this.updateBackgroundOnly(dt);
+        }
 
+        this.render();
         requestAnimationFrame((t) => this.loop(t));
+    }
+
+    updateBackgroundOnly(dt) {
+        // Just drift logic
+        this.bgMid.forEach(p => {
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+        });
     }
 
     update(dt) {
@@ -162,13 +229,15 @@ class GameLoop {
             return;
         }
 
-        // GROWTH LOGIC
-        // Scale Factor: mass 10 = scale 1.0, mass 100 = scale 2.0 (Sqrt curve)
+        // CHECK DEATH
+        if (this.creature.gameStats.health <= 0) {
+            this.gameState = 'gameover';
+            document.getElementById('game-over').style.display = 'flex';
+            return;
+        }
+
         const scale = Math.sqrt(this.creature.gameStats.mass / 10);
 
-        // Apply Scale to SoftBody
-        // Update Radii and Constraint Lengths smoothly
-        // Ideally done only on change, but lerping every frame is smooth
         this.creature.points.forEach(p => {
             if(p.baseRadius) p.radius = p.baseRadius * scale;
         });
@@ -179,13 +248,13 @@ class GameLoop {
         const head = this.creature.points[0];
         const inputVec = this.input.getVector();
 
-        // Speed adjusted by scale (Larger = Slower acceleration?)
-        // Force should scale with mass to maintain agility, or reduce for "heavy" feel.
-        // Let's keep agility high for fun.
-        const swimForce = this.creature.stats.speed * scale; // More force for bigger body
-        const turnSpeed = this.creature.stats.turnSpeed; // Slower turn?
+        // TUNING: Improved Speed & Turn
+        // Increased Base Speed (Snappier)
+        const swimForce = (this.creature.stats.speed + 1000) * scale;
+        const turnSpeed = this.creature.stats.turnSpeed * 2.0; // Faster turning
 
         if (this.input.active) {
+            // Apply Force
             head.x += inputVec.x * swimForce * dt * dt;
             head.y += inputVec.y * swimForce * dt * dt;
 
@@ -198,6 +267,7 @@ class GameLoop {
 
         this.physics.update(this.creature.points, this.creature.constraints, dt);
 
+        // Enemies
         for (let i = this.enemies.length - 1; i >= 0; i--) {
             const e = this.enemies[i];
             e.update(dt, head);
@@ -224,11 +294,11 @@ class GameLoop {
         for (let i = this.food.length - 1; i >= 0; i--) {
             const f = this.food[i];
             const dist = Math.hypot(head.x - f.x, head.y - f.y);
-            // Eat range scales
             if (dist < head.radius + f.radius) {
                 this.food.splice(i, 1);
                 this.creature.gameStats.dna += 1;
                 this.creature.gameStats.mass += 0.5;
+                this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5); // Heal on eat
                 this.audio.playEat();
                 this.spawnParticles(f.x, f.y, '#00ff00', 5, 100);
                 this.food.push({
@@ -239,15 +309,6 @@ class GameLoop {
                 });
             }
         }
-
-        // Camera Logic Updated for Size
-        // If huge, zoom out more.
-        // Base Zoom logic in Camera class might fight this.
-        // Let's pass scale as a hint to Camera update?
-        // Or manually adjust camera.targetZoom here if we want overrides.
-        // Camera.js handles speed zoom. Let's add size zoom.
-        // We can modify Camera to accept a "baseZoom" param.
-        // For now, let's just let the camera be.
 
         this.camera.update(head.x, head.y, head.vx, head.vy, dt);
 
@@ -337,50 +398,53 @@ class GameLoop {
 
         this.enemies.forEach(e => e.render(this.ctx));
 
-        const points = this.creature.points;
-        for (let i = points.length - 1; i >= 0; i--) {
-            const p = points[i];
-            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2);
-            grad.addColorStop(0, '#aaffff');
-            grad.addColorStop(1, 'rgba(0, 255, 255, 0)');
-            this.ctx.fillStyle = grad;
+        if (this.gameState === 'playing') {
+            const points = this.creature.points;
+            for (let i = points.length - 1; i >= 0; i--) {
+                const p = points[i];
+                const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2);
+                grad.addColorStop(0, '#aaffff');
+                grad.addColorStop(1, 'rgba(0, 255, 255, 0)');
+                this.ctx.fillStyle = grad;
+                this.ctx.beginPath();
+                this.ctx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2);
+                this.ctx.fill();
+                this.ctx.fillStyle = '#00ffff';
+                this.ctx.beginPath();
+                this.ctx.arc(p.x, p.y, p.radius * 0.8, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+
+            const head = points[0];
+            const scale = head.radius / head.baseRadius;
+
+            this.ctx.save();
+            this.ctx.translate(head.x, head.y);
+            this.ctx.rotate(this.headAngle);
+            this.ctx.scale(scale, scale);
+
+            this.ctx.fillStyle = 'white';
             this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2);
+            this.ctx.arc(10, -8, 6, 0, Math.PI*2);
+            this.ctx.arc(10, 8, 6, 0, Math.PI*2);
             this.ctx.fill();
-            this.ctx.fillStyle = '#00ffff';
+            this.ctx.fillStyle = 'black';
             this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.radius * 0.8, 0, Math.PI * 2);
+            this.ctx.arc(13, -8, 3, 0, Math.PI*2);
+            this.ctx.arc(13, 8, 3, 0, Math.PI*2);
             this.ctx.fill();
+            this.ctx.restore();
+
+            // Health Bar
+            this.ctx.fillStyle = '#333';
+            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale, 5 * scale);
+            this.ctx.fillStyle = this.creature.gameStats.health < 20 ? '#f00' : '#0f0';
+            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale * (Math.max(0, this.creature.gameStats.health) / 100), 5 * scale);
         }
-
-        const head = points[0];
-        const scale = head.radius / head.baseRadius; // Derive scale for rendering eyes size?
-
-        this.ctx.save();
-        this.ctx.translate(head.x, head.y);
-        this.ctx.rotate(this.headAngle);
-        this.ctx.scale(scale, scale); // Scale eyes
-
-        this.ctx.fillStyle = 'white';
-        this.ctx.beginPath();
-        this.ctx.arc(10, -8, 6, 0, Math.PI*2);
-        this.ctx.arc(10, 8, 6, 0, Math.PI*2);
-        this.ctx.fill();
-        this.ctx.fillStyle = 'black';
-        this.ctx.beginPath();
-        this.ctx.arc(13, -8, 3, 0, Math.PI*2);
-        this.ctx.arc(13, 8, 3, 0, Math.PI*2);
-        this.ctx.fill();
-        this.ctx.restore();
-
-        this.ctx.fillStyle = '#333';
-        this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale, 5 * scale);
-        this.ctx.fillStyle = '#0f0';
-        this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale * (this.creature.gameStats.health / 100), 5 * scale);
 
         this.camera.restore(this.ctx);
 
-        if (this.input.active && !this.editor.active) {
+        if (this.input.active && !this.editor.active && this.gameState === 'playing') {
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
             this.ctx.lineWidth = 2;
             this.ctx.beginPath();
