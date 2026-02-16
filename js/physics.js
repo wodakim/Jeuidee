@@ -1,4 +1,3 @@
-
 export default class Physics {
     constructor() {
         this.gravity = 0;
@@ -62,5 +61,46 @@ export default class Physics {
                 }
             }
         }
+    }
+
+    // --- COMBAT COLLISIONS ---
+
+    // Check overlap between two sets of soft-body points
+    static checkSoftBodyCollision(body1Points, body2Points) {
+        let collision = false;
+
+        // Naive O(N*M) check (Fine for small creatures)
+        for (let p1 of body1Points) {
+            for (let p2 of body2Points) {
+                const dx = p1.x - p2.x;
+                const dy = p1.y - p2.y;
+                const dist = Math.hypot(dx, dy);
+                const minDist = p1.radius + p2.radius;
+
+                if (dist < minDist) {
+                    collision = true;
+                    // Resolve overlap (Push apart)
+                    const overlap = minDist - dist;
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+
+                    const force = overlap * 0.5; // Split
+
+                    p1.x += nx * force;
+                    p1.y += ny * force;
+                    p2.x -= nx * force;
+                    p2.y -= ny * force;
+
+                    // Add Impulse (Bounce)
+                    // Modify old positions to create velocity change
+                    const bounce = 0.5;
+                    p1.oldX -= nx * bounce;
+                    p1.oldY -= ny * bounce;
+                    p2.oldX += nx * bounce;
+                    p2.oldY += ny * bounce;
+                }
+            }
+        }
+        return collision;
     }
 }
