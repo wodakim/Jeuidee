@@ -572,6 +572,8 @@
                     });
                 }
             }
+
+            draw(ctx, cameraX, cameraY, zoom) {
                 ctx.save();
                 // Apply Parallax translation
                 const px = -cameraX * this.scrollFactor;
