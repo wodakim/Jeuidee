@@ -54,28 +54,6 @@
             box-sizing: border-box;
         }
 
-        /* Landscape Enforcement Overlay */
-        #orientation-lock {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #000;
-            color: #fff;
-            display: none; /* Hidden by default */
-            justify-content: center;
-            align-items: center;
-            z-index: 9999;
-            flex-direction: column;
-            text-align: center;
-        }
-
-        /* Logic to show orientation lock on portrait */
-        @media screen and (orientation: portrait) {
-            #orientation-lock { display: flex; }
-        }
-
         /* UI Layer - sits above canvas */
         #ui-layer {
             position: absolute;
@@ -182,10 +160,64 @@
         }
 
         /* Adjust for mobile landscape */
-        @media (max-width: 800px) {
+        @media (max-width: 800px) and (orientation: landscape) {
             .panel { width: 180px; padding: 10px; }
             .part-icon { font-size: 20px; }
             .part-btn { padding: 10px; font-size: 0.8em; }
+        }
+
+        /* Portrait Mode Support (Mobile) */
+        @media (orientation: portrait) {
+            .editor-panels {
+                flex-direction: column;
+                pointer-events: none;
+            }
+
+            .panel {
+                width: 100%;
+                height: auto;
+                max-height: 25%;
+                flex-direction: row;
+                padding: 10px;
+                overflow-x: auto;
+                overflow-y: hidden;
+                box-sizing: border-box;
+                align-items: center;
+                justify-content: flex-start;
+                gap: 15px;
+            }
+
+            /* Order: Parts on Top, Stats/Mutation on Bottom */
+            .panel:first-child {
+                order: 2;
+                border-top: 1px solid rgba(0,255,255,0.3);
+                border-bottom: none;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .panel:last-child {
+                order: 1;
+                border-bottom: 1px solid rgba(0,255,255,0.3);
+                border-top: none;
+            }
+
+            .parts-grid {
+                display: flex;
+                flex-direction: row;
+                width: auto;
+                gap: 15px;
+            }
+
+            .part-btn {
+                min-width: 80px;
+                padding: 10px;
+            }
+
+            h3, h4 { display: none; } /* Save space */
+
+            #trash-zone {
+                bottom: 30%; /* Move up above bottom panel */
+            }
         }
 
         .parts-grid {
@@ -334,13 +366,6 @@
 </head>
 <body>
 
-    <!-- Landscape Lock -->
-    <div id="orientation-lock">
-        <div style="font-size: 40px; margin-bottom: 20px;">📱↺</div>
-        <h1>Please Rotate Your Device</h1>
-        <p>This experience is designed for Landscape mode.</p>
-    </div>
-
     <!-- Game Container -->
     <div id="game-container">
         <canvas id="gameCanvas"></canvas>
@@ -444,7 +469,7 @@
         const CELL_BASE_RADIUS = 20;
 
         // Game State
-        const state = {
+        window.state = {
             running: false,
             lastTime: 0,
 
@@ -691,8 +716,8 @@
                 bgOminousItems.push({
                     x: MathUtils.randomRange(-2000, WORLD_SIZE + 2000),
                     y: MathUtils.randomRange(-2000, WORLD_SIZE + 2000),
-                    r: MathUtils.randomRange(1000, 2500),
-                    color: Math.random() > 0.5 ? '#330000' : '#001100' // Dark Red or Green
+                    r: MathUtils.randomRange(500, 1200), // Reduced size
+                    color: Math.random() > 0.5 ? '#441111' : '#112211' // Slightly brighter
                 });
             }
 
@@ -1079,78 +1104,6 @@
             }
         }
 
-        // --- INPUT HANDLING ---
-        function setupInput() {
-            const handleStart = (x, y) => {
-                if (state.editor.active) {
-                    // Editor Interaction (Selection / Vertebrae click)
-                    // If not dragging logic handled by UI events
-                    return;
-                }
-
-                state.input.active = true;
-                state.input.startX = x;
-                state.input.startY = y;
-                state.input.currX = x;
-                state.input.currY = y;
-                state.input.distance = 0;
-            };
-
-            const handleMove = (x, y) => {
-                // Editor Drag
-                if (state.editor.active && state.editor.dragging) {
-                    state.editor.dragX = x;
-                    state.editor.dragY = y;
-                    return;
-                }
-
-                if (!state.input.active) return;
-                state.input.currX = x;
-                state.input.currY = y;
-
-                const dx = x - state.input.startX;
-                const dy = y - state.input.startY;
-                state.input.angle = Math.atan2(dy, dx);
-                state.input.distance = Math.min(MathUtils.dist(0, 0, dx, dy), 50); // Cap stick distance
-            };
-
-            const handleEnd = () => {
-                if (state.editor.active && state.editor.dragging) {
-                    dropPart();
-                    return;
-                }
-
-                state.input.active = false;
-                state.input.distance = 0;
-            };
-
-            // Touch
-            canvas.addEventListener('touchstart', e => {
-                // Check if target is UI button, let it pass?
-                // e.preventDefault(); // removed to allow button clicks?
-                // But we need preventDefault to stop scroll/zoom.
-                // UI buttons are overlay, they catch events first if pointer-events:auto
-                if(e.target === canvas) e.preventDefault();
-                handleStart(e.touches[0].clientX, e.touches[0].clientY);
-            }, {passive: false});
-
-            canvas.addEventListener('touchmove', e => {
-                if(e.target === canvas) e.preventDefault();
-                handleMove(e.touches[0].clientX, e.touches[0].clientY);
-            }, {passive: false});
-
-            canvas.addEventListener('touchend', e => {
-                if(e.target === canvas) e.preventDefault();
-                handleEnd();
-            });
-
-            // Mouse (for testing)
-            // Listen on window for move/up to catch drags outside canvas
-            canvas.addEventListener('mousedown', e => handleStart(e.clientX, e.clientY));
-            window.addEventListener('mousemove', e => handleMove(e.clientX, e.clientY));
-            window.addEventListener('mouseup', handleEnd);
-        }
-
         // --- GAME LOOP ---
         function gameLoop(timestamp) {
             if (!state.running) {
@@ -1217,19 +1170,7 @@
             // Check if mass changed significantly to resize visuals?
             // Simplified: Rebuild skin if scale changed
             // Actually, CreatureBody should handle scaling.
-            // For this skeleton, we hack: Reset creature skin radius based on mass.
-            if (state.player.creature.softBody) {
-                const currentRad = state.player.creature.softBody.baseRadius;
-                const targetRad = CELL_BASE_RADIUS * scaleFactor;
-
-                if (Math.abs(currentRad - targetRad) > 1) {
-                     // We need to preserve the spine logic, this hack was for single SoftBody
-                     // Ideally we call state.player.creature.rebuildSkin() or update radii?
-                     // For now, let's just update the softBody inside if it exists.
-                     state.player.creature.softBody = new SoftBody(targetRad, 16, 8, 0.8);
-                     state.player.radius = targetRad;
-                }
-            }
+            // For now, let's just update the creature.
 
             state.player.creature.update(dt, state.player.vx, state.player.vy, state.player.mass);
 
@@ -1242,7 +1183,8 @@
             state.camera.y = MathUtils.lerp(state.camera.y, targetCamY, 5 * dt);
 
             // Zoom based on size (Gigantism Effect)
-            state.camera.targetZoom = Math.max(0.2, 1 / (scaleFactor * 0.8));
+            // Slower falloff using damped curve: 1 / (1 + (scale - 1) * 0.3)
+            state.camera.targetZoom = Math.max(0.2, 1 / (1 + (scaleFactor - 1) * 0.3));
             state.camera.zoom = MathUtils.lerp(state.camera.zoom, state.camera.targetZoom, 2 * dt);
 
             // 3. Collision Detection (Food)
@@ -1376,7 +1318,7 @@
             bgOminousItems.forEach(b => {
                 b.x += 0.05; // Very slow drift
                 ctx.fillStyle = b.color;
-                ctx.globalAlpha = 0.2;
+                ctx.globalAlpha = 0.3; // Increased visibility
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
                 ctx.fill();
@@ -1745,10 +1687,12 @@
             state.running = true;
 
             // Force Camera Center for Editing
-            state.camera.targetZoom = 1.5; // Zoom in for details
-            // We'll lerp to this in render, but let's snap X/Y to player
-            state.camera.x = state.player.x - (canvas.width / 2) / 1.5;
-            state.camera.y = state.player.y - (canvas.height / 2) / 1.5;
+            state.camera.targetZoom = 2.5;
+            state.camera.zoom = 2.5; // Apply immediately since update() is paused
+
+            // Snap X/Y to player immediately
+            state.camera.x = state.player.x - (canvas.width / 2) / 2.5;
+            state.camera.y = state.player.y - (canvas.height / 2) / 2.5;
         }
 
         window.closeEditor = () => {
