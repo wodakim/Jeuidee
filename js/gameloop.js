@@ -45,7 +45,7 @@ class GameLoop {
         this.editor = new Editor(this);
 
         // Ecosystem
-        this.bgAbyssal = [];
+        this.bgAbyssal = []; // REMOVED GIANTS
         this.bgDeep = [];
         this.bgMid = [];
         this.bgFore = [];
@@ -357,38 +357,7 @@ class GameLoop {
     initBackground() {
         this.bgAbyssal = []; this.bgDeep = []; this.bgMid = []; this.bgFore = [];
 
-        // Procedural Giants (Leviathans, Worms, Jellies)
-        for(let i=0; i<8; i++) {
-             const type = Math.random() > 0.5 ? 'worm' : 'jelly';
-             const giant = {
-                 type: type,
-                 x: (Math.random() - 0.5) * 8000,
-                 y: (Math.random() - 0.5) * 8000,
-                 vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
-                 segments: [],
-                 tentacles: []
-             };
-
-             if (type === 'worm') {
-                 const len = 20 + Math.random() * 20;
-                 for(let j=0; j<len; j++) {
-                     giant.segments.push({ ox: j * 60, oy: 0, r: 80 + Math.random() * 40 });
-                 }
-             } else {
-                 // Jelly
-                 giant.radius = 200 + Math.random() * 300;
-                 const tentacleCount = 5 + Math.floor(Math.random() * 5);
-                 for(let t=0; t<tentacleCount; t++) {
-                     const tentacle = [];
-                     const len = 10 + Math.random() * 10;
-                     for(let k=0; k<len; k++) {
-                         tentacle.push({ ox: (k*20), oy: (k*50) + Math.random()*20, r: 20 - k });
-                     }
-                     giant.tentacles.push(tentacle);
-                 }
-             }
-             this.bgAbyssal.push(giant);
-        }
+        // Removed Giants loop for performance
 
         for(let i=0; i<100; i++) this.bgDeep.push({ x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 6000, r: Math.random() * 4 + 2, alpha: Math.random() * 0.2 });
         for(let i=0; i<200; i++) this.bgMid.push({ x: (Math.random() - 0.5) * 4000, y: (Math.random() - 0.5) * 4000, r: Math.random() * 3, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, alpha: Math.random() * 0.3 });
@@ -427,7 +396,7 @@ class GameLoop {
     }
 
     updateBackgroundOnly(dt) {
-        this.bgAbyssal.forEach(g => { g.x += g.vx * dt; g.y += g.vy * dt; });
+        this.bgDeep.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; }); // Actually deep has no velocity?
         this.bgMid.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
         this.bgFore.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
     }
@@ -533,6 +502,9 @@ class GameLoop {
     }
 
     spawnParticles(x, y, color, count, speedVar = 100) {
+        // Optimization: Cap particles
+        if (this.particles.length > 50) return;
+
         for(let i=0; i<count; i++) {
             const angle = Math.random() * Math.PI * 2;
             const speed = Math.random() * speedVar;
@@ -545,44 +517,8 @@ class GameLoop {
         bgGrad.addColorStop(0, '#000510'); bgGrad.addColorStop(1, '#001020');
         this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
 
-        // --- LAYER 0: ABYSSAL GIANTS (Parallax 0.05) ---
-        this.ctx.save();
-        this.ctx.translate(this.width/2, this.height/2);
-        this.ctx.scale(this.camera.zoom, this.camera.zoom);
-        this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
-        this.ctx.fillStyle = '#000810';
-        if(this.settings.fxEnabled) this.ctx.filter = 'blur(15px)';
-
-        this.bgAbyssal.forEach(g => {
-            if (g.type === 'worm') {
-                // Draw Worm Spine
-                g.segments.forEach((s, i) => {
-                    const wave = Math.sin(Date.now() * 0.001 + i * 0.5) * 50;
-                    this.ctx.beginPath();
-                    this.ctx.arc(g.x + s.ox, g.y + s.oy + wave, s.r, 0, Math.PI * 2);
-                    this.ctx.fill();
-                });
-            } else {
-                // Draw Jelly
-                const float = Math.sin(Date.now() * 0.0005) * 50;
-                this.ctx.beginPath();
-                this.ctx.arc(g.x, g.y + float, g.radius, Math.PI, 0); // Semi-circle head
-                this.ctx.fill();
-                // Tentacles
-                if (g.tentacles) {
-                    g.tentacles.forEach((t, ti) => {
-                        t.forEach((seg, k) => {
-                            const wave = Math.sin(Date.now() * 0.002 + k * 0.2 + ti) * 30;
-                            this.ctx.beginPath();
-                            this.ctx.arc(g.x + (ti-2)*60 + wave, g.y + float + seg.oy, seg.r, 0, Math.PI*2);
-                            this.ctx.fill();
-                        });
-                    });
-                }
-            }
-        });
-        this.ctx.filter = 'none';
-        this.ctx.restore();
+        // --- LAYER 0: ABYSSAL GIANTS (REMOVED) ---
+        // Optimization: Giant layer completely removed per request
 
         this.ctx.save();
         this.ctx.translate(this.width/2, this.height/2);
