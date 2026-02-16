@@ -1,4 +1,3 @@
-
 export default class Camera {
     constructor(width, height) {
         this.x = 0;
@@ -12,6 +11,7 @@ export default class Camera {
         // Settings
         this.followStrength = 0.05; // Lerp factor (lower = smoother/lazier)
         this.lookAhead = 100; // How far to look ahead based on velocity
+        this.baseZoom = 1.0;
     }
 
     resize(w, h) {
@@ -19,40 +19,49 @@ export default class Camera {
         this.viewportHeight = h;
     }
 
-    update(targetX, targetY, targetVx, targetVy, dt) {
+    update(targetX, targetY, targetVx, targetVy, dt, playerMass = 10) {
         // 1. Calculate Target Position (Center on player + Lookahead)
-        // We want the player to be in the center, so Camera coordinates are top-left of the view
-
-        // Target is the world position we want in the center of the screen
         const idealX = targetX + targetVx * 0.5; // Lookahead
         const idealY = targetY + targetVy * 0.5;
 
         // 2. Smoothly interpolate current camera position towards ideal
-        // Note: Camera.x/y represents the CENTER of the view in World Space
         this.x += (idealX - this.x) * this.followStrength;
         this.y += (idealY - this.y) * this.followStrength;
 
-        // 3. Zoom Logic (Dynamic based on speed?)
+        // 3. Zoom Logic (Dynamic based on Mass and Speed)
+        // Base scale inverse to mass
+        // Mass 10 -> Scale 1.0
+        // Mass 100 -> Scale 3.16 -> Zoom ~0.3
+
+        const playerScale = Math.sqrt(playerMass / 10);
+
+        // Target Zoom is inverse of player scale, but clamped
+        // Zoom out as player gets bigger to keep view consistent relative to player size
+        const massZoom = this.baseZoom / Math.max(1, playerScale * 0.8);
+
+        // Also zoom out slightly with speed
         const speed = Math.hypot(targetVx, targetVy);
-        // Base zoom 1, zoom out to 0.5 at high speed
         const speedFactor = Math.min(speed / 1000, 1);
-        this.targetZoom = 1 - (speedFactor * 0.3); // Max zoom out 0.7
+        const speedZoomMod = 1 - (speedFactor * 0.2);
+
+        this.targetZoom = massZoom * speedZoomMod;
+
+        // Clamp min zoom to avoid seeing edge of world if we had one (but world is infinite parallax)
+        this.targetZoom = Math.max(0.1, this.targetZoom);
 
         this.zoom += (this.targetZoom - this.zoom) * 0.02; // Slow zoom
     }
 
     // Convert World Point to Screen Point
     worldToScreen(wx, wy) {
-        // (World - Cam) * Zoom + HalfScreen
         return {
             x: (wx - this.x) * this.zoom + this.viewportWidth / 2,
             y: (wy - this.y) * this.zoom + this.viewportHeight / 2
         };
     }
 
-    // Convert Screen Point to World Point (for Input)
+    // Convert Screen Point to World Point
     screenToWorld(sx, sy) {
-        // (Screen - HalfScreen) / Zoom + Cam
         return {
             x: (sx - this.viewportWidth / 2) / this.zoom + this.x,
             y: (sy - this.viewportHeight / 2) / this.zoom + this.y

@@ -11,6 +11,7 @@ def bundle():
         'js/settings.js',
         'js/renderer.js',
         'js/save_manager.js',
+        'js/progression.js',
         'js/input.js',
         'js/enemy.js',
         'js/editor.js',
@@ -40,6 +41,8 @@ def bundle():
             content = re.sub(r'export default class', 'class', content)
             # Remove regular exports (export class -> class)
             content = re.sub(r'export class', 'class', content)
+            # Remove export { } at end
+            content = re.sub(r'export \{.*\};', '', content)
 
             js_content += f"\n// --- {js} ---\n{content}\n"
 
