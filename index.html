@@ -1195,12 +1195,17 @@
             // Simplified: Rebuild skin if scale changed
             // Actually, CreatureBody should handle scaling.
             // For this skeleton, we hack: Reset creature skin radius based on mass.
-            const currentRad = state.player.creature.softBody.baseRadius;
-            const targetRad = CELL_BASE_RADIUS * scaleFactor;
+            if (state.player.creature.softBody) {
+                const currentRad = state.player.creature.softBody.baseRadius;
+                const targetRad = CELL_BASE_RADIUS * scaleFactor;
 
-            if (Math.abs(currentRad - targetRad) > 1) {
-                 state.player.creature.softBody = new SoftBody(targetRad, 16, 8, 0.8);
-                 state.player.radius = targetRad;
+                if (Math.abs(currentRad - targetRad) > 1) {
+                     // We need to preserve the spine logic, this hack was for single SoftBody
+                     // Ideally we call state.player.creature.rebuildSkin() or update radii?
+                     // For now, let's just update the softBody inside if it exists.
+                     state.player.creature.softBody = new SoftBody(targetRad, 16, 8, 0.8);
+                     state.player.radius = targetRad;
+                }
             }
 
             state.player.creature.update(dt, state.player.vx, state.player.vy, state.player.mass);
