@@ -566,13 +566,12 @@
                     this.items.push({
                         x: MathUtils.randomRange(-range, range),
                         y: MathUtils.randomRange(-range, range),
-                        size: type === 'deep' ? MathUtils.randomRange(200, 600) : MathUtils.randomRange(2, 10),
-                        alpha: type === 'deep' ? MathUtils.randomRange(0.05, 0.15) : MathUtils.randomRange(0.1, 0.4)
+                        size: type === 'deep' ? MathUtils.randomRange(600, 1500) : MathUtils.randomRange(2, 10), // Bigger giants
+                        alpha: type === 'deep' ? MathUtils.randomRange(0.02, 0.08) : MathUtils.randomRange(0.1, 0.4),
+                        vx: MathUtils.randomRange(-10, 10) // Drift
                     });
                 }
             }
-
-            draw(ctx, cameraX, cameraY, zoom) {
                 ctx.save();
                 // Apply Parallax translation
                 const px = -cameraX * this.scrollFactor;
@@ -800,34 +799,53 @@
 
             update(dt, vx, vy, mass) {
                 this.breath += dt * 2;
-                // Simulate spine physics (trailing)
-                // Head follows position, subsequent nodes trail behind
-                // NOTE: Since x,y are passed to draw, the spine stores RELATIVE offsets?
-                // Or absolute? Let's keep spine Relative to Head (0,0) for simpler logic,
-                // but animate the relative offsets to simulate drag.
 
-                // Simple drag simulation on spine nodes
+                // FLUID SPINE PHYSICS (Inverse Kinematics / Drag)
+
+                // The head (spine[0]) is always at 0,0 relative.
+                // We update subsequent nodes to trail behind.
+
+                // We need to apply "world velocity" influence to relative nodes to simulate drag.
+                // If creature moves RIGHT (vx > 0), relative nodes should drift LEFT.
+                const dragForceX = -vx * dt * 0.5;
+                const dragForceY = -vy * dt * 0.5;
+
                 for(let i=1; i<this.spine.length; i++) {
                     const prev = this.spine[i-1];
                     const curr = this.spine[i];
 
-                    // Ideal distance
-                    const spacing = (prev.radius + curr.radius) * 0.8;
+                    // 1. Apply Drag (Inertia)
+                    curr.relX += dragForceX;
+                    curr.relY += dragForceY;
+
+                    // 2. Constraint Solving (Distance Constraint)
+                    // "Gummi" feel: spacing isn't rigid, it's a spring.
+                    const spacing = (prev.radius + curr.radius) * 0.7; // Overlap slightly
                     const dx = curr.relX - prev.relX;
                     const dy = curr.relY - prev.relY;
                     const dist = Math.hypot(dx, dy);
 
-                    // Spring back to spacing
                     if (dist > 0) {
-                        const lerpFactor = 5 * dt;
-                        // Target pos: behind previous node based on velocity?
-                        // Simplified: Just keep distance constraint
-                        const scale = spacing / dist;
-                        const tx = prev.relX + dx * scale;
-                        const ty = prev.relY + dy * scale;
+                        // Spring correction
+                        // If too far, pull in. If too close, push out.
+                        const difference = spacing - dist;
+                        const percent = difference / dist / 2; // Split adjustment? No, prev is fixed (parent)
 
-                        curr.relX = MathUtils.lerp(curr.relX, tx, lerpFactor);
-                        curr.relY = MathUtils.lerp(curr.relY, ty, lerpFactor);
+                        // Strict follow (Snake) vs Soft (Jelly)
+                        // Use Lerp for softness
+                        const stiffness = 10 * dt;
+
+                        const offsetX = dx * percent;
+                        const offsetY = dy * percent;
+
+                        // Move current towards ideal position
+                        // Target position relative to prev
+                        const targetAngle = Math.atan2(dy, dx);
+                        const targetX = prev.relX + Math.cos(targetAngle) * spacing;
+                        const targetY = prev.relY + Math.sin(targetAngle) * spacing;
+
+                        curr.relX = MathUtils.lerp(curr.relX, targetX, stiffness);
+                        curr.relY = MathUtils.lerp(curr.relY, targetY, stiffness);
                     }
                 }
             }
@@ -1340,16 +1358,28 @@
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // --- ATMOSPHERE (Parallax) ---
-            // Draw Deep Layer (ScrollFactor 0.1)
+
+            // Draw Deep Layer (ScrollFactor 0.1, Blurred)
             ctx.save();
+            // Deep Layer Transform
             ctx.translate(canvas.width/2, canvas.height/2);
-            ctx.scale(state.camera.zoom, state.camera.zoom); // Zoom affects background less? Or full?
-            // Usually bg scales less, but for Spore feel, stick to consistent scale for now, just scroll slower.
+            // Parallax scale: zoom affects it less to fake distance
+            const deepZoom = MathUtils.lerp(1, state.camera.zoom, 0.1);
+            ctx.scale(deepZoom, deepZoom);
             ctx.translate(-state.camera.x * 0.1, -state.camera.y * 0.1);
 
-            ctx.fillStyle = '#000a1a'; // Slightly lighter than black
+            // Apply Blur (Expensive! Limit item count or use pre-blurred sprites if needed)
+            // For 20 items it should be fine on modern phones.
+            ctx.filter = 'blur(20px)';
+            ctx.fillStyle = '#001133';
+
             bgDeepItems.forEach(b => {
+                // Animate drift
+                b.x += 0.1; // Slow drift
+
+                ctx.globalAlpha = 0.3;
                 ctx.beginPath();
+                // Draw irregular blob? Circle is fine with blur
                 ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
                 ctx.fill();
             });
@@ -1431,6 +1461,20 @@
 
             ctx.restore();
 
+            // Editor Drag Preview
+            if (state.editor.active && state.editor.dragging) {
+                ctx.save();
+                // Draw Icon at finger pos (Screen Space)
+                ctx.font = "30px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                const icon = state.editor.dragging.type === 'fin' ? '⚡' :
+                             state.editor.dragging.type === 'spike' ? '⚔️' :
+                             state.editor.dragging.type === 'eye' ? '👁️' : '🤢';
+                ctx.fillText(icon, state.editor.dragX, state.editor.dragY);
+                ctx.restore();
+            }
+
             // Draw Virtual Joystick (Overlay UI)
             if (state.input.active) {
                 ctx.save();
@@ -1490,14 +1534,38 @@
                 let steerX = 0, steerY = 0;
 
                 if (this.state === 'wander') {
-                    // Simple wander: seek random point
-                    const dx = this.targetX - this.x;
-                    const dy = this.targetY - this.y;
-                    const dist = Math.hypot(dx, dy);
-                    if (dist < 50) this.pickNewState(); // Reached target
+                    // Search for food nearby
+                    let closestFood = null;
+                    let minDist = 300; // Sight range
 
-                    steerX = dx / dist * this.speed;
-                    steerY = dy / dist * this.speed;
+                    for (const f of state.foods) {
+                        // Check diet compatibility
+                        const canEat = (this.type === 'grazer' && f.type === 'plant') || (this.type === 'aggressor' && f.type === 'meat');
+                        if (!canEat) continue;
+
+                        const d = MathUtils.dist(this.x, this.y, f.x, f.y);
+                        if (d < minDist) {
+                            minDist = d;
+                            closestFood = f;
+                        }
+                    }
+
+                    if (closestFood) {
+                        // Seek Food
+                        const dx = closestFood.x - this.x;
+                        const dy = closestFood.y - this.y;
+                        steerX = dx / minDist * this.speed;
+                        steerY = dy / minDist * this.speed;
+                    } else {
+                        // Standard Wander
+                        const dx = this.targetX - this.x;
+                        const dy = this.targetY - this.y;
+                        const dist = Math.hypot(dx, dy);
+                        if (dist < 50) this.pickNewState();
+
+                        steerX = dx / dist * (this.speed * 0.5); // Slower wander
+                        steerY = dy / dist * (this.speed * 0.5);
+                    }
                 }
                 else if (this.state === 'chase' && this.type === 'aggressor') {
                     // Chase Player
@@ -1650,8 +1718,13 @@
         function openEditor() {
             state.editor.active = true;
             document.getElementById('editor-ui').classList.remove('hidden');
-            state.running = true; // Keep loop running for render (paused update)
-            // But skip update logic
+            state.running = true;
+
+            // Force Camera Center for Editing
+            state.camera.targetZoom = 1.5; // Zoom in for details
+            // We'll lerp to this in render, but let's snap X/Y to player
+            state.camera.x = state.player.x - (canvas.width / 2) / 1.5;
+            state.camera.y = state.player.y - (canvas.height / 2) / 1.5;
         }
 
         window.closeEditor = () => {
@@ -1702,23 +1775,26 @@
             if (mx >= trash.left && mx <= trash.right && my >= trash.top && my <= trash.bottom) {
                 // Delete
             } else {
-                // Place on Creature
-                // Raycast: Find closest point on skin
-                // Simplified: Find closest vertebra
+                // Place on Creature (Raycast)
+                // We must use CURRENT camera transform to map Screen -> World
+                // In Editor, we force center, but zoom applies.
+
+                // World Mouse (Approx, assuming player centered)
+                const zoom = state.camera.zoom;
+                const worldMX = state.camera.x + mx / zoom;
+                const worldMY = state.camera.y + my / zoom;
+
                 let closestV = null;
                 let minDist = Infinity;
-
-                // Screen coordinates of creature center (it's centered on screen in editor usually?)
-                // Camera is tracking player. So player is at Center of Canvas.
-                const cx = canvas.width / 2;
-                const cy = canvas.height / 2;
-
                 let bestIdx = 0;
 
+                // Check distance to spine nodes in World Space
                 state.player.creature.spine.forEach((v, idx) => {
-                    const vx = cx + v.relX; // relative to center
-                    const vy = cy + v.relY;
-                    const d = MathUtils.dist(mx, my, vx, vy);
+                    // Vertebra World Pos = PlayerPos + RelPos
+                    const vx = state.player.x + v.relX;
+                    const vy = state.player.y + v.relY;
+
+                    const d = MathUtils.dist(worldMX, worldMY, vx, vy);
                     if (d < minDist) {
                         minDist = d;
                         closestV = v;
@@ -1726,23 +1802,19 @@
                     }
                 });
 
-                // Angle from vertebra center
-                const vx = cx + closestV.relX;
-                const vy = cy + closestV.relY;
-                const angle = Math.atan2(my - vy, mx - vx);
+                // Only attach if close enough (e.g. within 2x radius)
+                if (closestV && minDist < closestV.radius * 3) {
+                    const vx = state.player.x + closestV.relX;
+                    const vy = state.player.y + closestV.relY;
+                    const angle = Math.atan2(worldMY - vy, worldMX - vx);
 
-                // Add Part
-                // angleOffset relative to creature rotation (0 in editor)
-                state.player.creature.parts.push(new BodyPart(drag.type, bestIdx, angle, 5, false));
+                    state.player.creature.parts.push(new BodyPart(drag.type, bestIdx, angle, 5, false));
+                }
             }
 
             state.editor.dragging = null;
             document.getElementById('trash-zone').style.display = 'none';
         }
-
-        // Mod render to handle Editor State
-        const originalRender = render;
-        // render = ... moved below
 
         // Init Input
         setupInput();
