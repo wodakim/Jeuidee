@@ -8,6 +8,7 @@ def bundle():
         'js/physics.js',
         'js/stats.js',
         'js/camera.js',
+        'js/settings.js',
         'js/renderer.js',
         'js/save_manager.js',
         'js/input.js',
