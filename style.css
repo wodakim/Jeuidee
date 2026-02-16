@@ -122,6 +122,7 @@ h1 {
 #editor-overlay {
     background: rgba(0, 0, 0, 0.4);
     animation: fadeIn 0.3s forwards;
+    z-index: 2000; /* Ensure above Ad Space */
 }
 
 .editor-sidebar {
@@ -131,6 +132,7 @@ h1 {
     flex-direction: column;
     gap: 15px;
     padding: 15px;
+    pointer-events: auto; /* Catch clicks */
 }
 
 .editor-sidebar.right { right: 20px; }
@@ -147,6 +149,7 @@ h1 {
     font-size: 0.9rem;
     background: rgba(0, 20, 40, 0.8);
     border: 1px solid rgba(255,255,255,0.1);
+    pointer-events: auto; /* Explicitly auto */
 }
 
 .part-item:active { cursor: grabbing; transform: scale(0.9); }
@@ -157,7 +160,7 @@ h1 {
 
 .editor-controls {
     position: absolute;
-    bottom: 30px;
+    bottom: 80px; /* Raised above Ad Space (50px) */
     width: 100%;
     display: flex;
     justify-content: center;
