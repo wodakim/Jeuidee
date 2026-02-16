@@ -1,3 +1,5 @@
+import Physics from './physics.js';
+
 export default class Editor {
     constructor(game) {
         this.game = game;
@@ -9,7 +11,7 @@ export default class Editor {
         this.dragX = 0;
         this.dragY = 0;
 
-        // Setup UI immediately? Or wait for DOM?
+        // Setup UI immediately
         setTimeout(() => this.setupUI(), 100);
     }
 
@@ -33,13 +35,13 @@ export default class Editor {
             </div>
 
             <div style="position:absolute; top:20px; right:20px; width:80px; pointer-events:auto; display:flex; flex-direction:column; gap:10px;">
-                <div class="part-item" data-type="Fin" style="background:rgba(0,255,255,0.2); border:1px solid #0ff; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#0ff;">FIN</div>
-                <div class="part-item" data-type="Spike" style="background:rgba(255,0,0,0.2); border:1px solid #f00; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#f00;">SPIKE</div>
-                <div class="part-item" data-type="Eye" style="background:rgba(255,255,255,0.2); border:1px solid #fff; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#fff;">EYE</div>
+                <div class="part-item" data-type="Fin" style="background:rgba(0,255,255,0.2); border:1px solid #0ff; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#0ff;">FIN (5)</div>
+                <div class="part-item" data-type="Spike" style="background:rgba(255,0,0,0.2); border:1px solid #f00; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#f00;">SPIKE (5)</div>
+                <div class="part-item" data-type="Eye" style="background:rgba(255,255,255,0.2); border:1px solid #fff; padding:15px; text-align:center; border-radius:8px; cursor:grab; color:#fff;">EYE (5)</div>
             </div>
 
             <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:Orbitron; font-size:20px; text-shadow:0 0 5px #0ff;">
-                WORKBENCH
+                WORKBENCH <span id="editor-dna" style="font-size:0.8em; color:#fff;">DNA: 0</span>
             </div>
         `;
         document.body.appendChild(this.overlay);
@@ -66,6 +68,7 @@ export default class Editor {
         this.active = active;
         if (this.overlay) {
             this.overlay.style.display = active ? 'block' : 'none';
+            if (active) this.updateDNA();
         }
 
         if (active) {
@@ -77,11 +80,22 @@ export default class Editor {
         }
     }
 
+    updateDNA() {
+        const el = document.getElementById('editor-dna');
+        if (el && this.game.creature) {
+            el.innerText = `DNA: ${Math.floor(this.game.creature.gameStats.dna)}`;
+        }
+    }
+
     addVertebra() {
         if (!this.game.creature) return;
+        if (this.game.creature.gameStats.dna < 10) return;
 
         const points = this.game.creature.points;
         if (points.length >= 20) return; // Cap length
+
+        this.game.creature.gameStats.dna -= 10;
+        this.updateDNA();
 
         const last = points[points.length-1];
         const prev = points[points.length-2] || last;
@@ -89,34 +103,21 @@ export default class Editor {
         // Calculate angle
         const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
 
-        // Create new Point (Manual import dependency workaround: Use game Physics instance prototype or just raw object)
-        // Ideally we import Physics, but let's use the static method from game instance if available, or duplicate logic.
-        // Or better: import Physics at top.
-
-        // New Point
+        // Create new Point
         const newX = last.x + Math.cos(angle) * 20;
         const newY = last.y + Math.sin(angle) * 20;
 
-        const newP = {
-            x: newX, y: newY,
-            oldX: newX, oldY: newY,
-            vx: 0, vy: 0,
-            radius: Math.max(5, last.radius * 0.9), // Taper
-            mass: 1,
-            pinned: false
-        };
+        // Decrease radius slightly
+        const newRadius = Math.max(5, last.radius * 0.9);
+
+        const newP = Physics.createPoint(newX, newY, newRadius, 1);
+        newP.baseRadius = newRadius; // Important for scaling
 
         points.push(newP);
 
         // New Constraint
-        // We need Physics class reference. Let's assume Physics is globally available or imported.
-        // Since we are in module, we can just create the object structure manually matching Physics.js
-        const newC = {
-            p1: last,
-            p2: newP,
-            length: 18,
-            stiffness: 0.3
-        };
+        const newC = Physics.createConstraint(last, newP, 0.3, 15);
+        newC.baseLength = 15; // Important for scaling
 
         this.game.creature.constraints.push(newC);
     }
@@ -143,10 +144,6 @@ export default class Editor {
         this.isDragging = false;
 
         // Drop Logic (Raycast to Spine)
-        // We need to convert screen dragX,Y to World Coordinates using Camera
-        // BUT dragX,Y are screen coordinates.
-        // We compare to Bone Screen Coordinates.
-
         const cam = this.game.camera;
 
         let closest = null;
@@ -167,21 +164,41 @@ export default class Editor {
         });
 
         if (closest) {
+            if (this.game.creature.gameStats.dna < 5) return;
+
             // Attach Part
             if (!this.game.creature.parts) this.game.creature.parts = [];
 
-            // Calculate angle relative to bone (World Space)
-            // But usually parts snap to 90 degrees or -90 degrees (Fins)
-            // Let's just store Type and Index. Renderer handles orientation.
+            this.game.creature.gameStats.dna -= 5;
+            this.updateDNA();
+
+            // Calculate Side
+            // 1. Get Spine Vector (Bone -> Prev Bone)
+            const bone = closest.point;
+            const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1]; // Fallback
+
+            // If fallback is next bone (head case), reverse vector
+            let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
+            if (closest.index === 0) {
+                 spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
+            }
+
+            // 2. Get Drop Vector (World)
+            const dropWorld = cam.screenToWorld(this.dragX, this.dragY);
+            const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
+
+            // 3. Cross Product
+            const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
+            const side = cross > 0 ? 1 : -1;
 
             this.game.creature.parts.push({
                 type: this.selectedPart,
                 boneIndex: closest.index,
-                side: 1 // 1 = Right, -1 = Left (TODO: Determine side based on drop pos relative to spine normal)
+                side: side
             });
 
-            // Simple toggle side for now?
-            // Or just add bilateral symmetry by default?
+            // Update Stats
+            this.game.creature.stats.calculate(this.game.creature.parts);
         }
 
         this.selectedPart = null;
@@ -190,6 +207,9 @@ export default class Editor {
     getEventPos(e) {
         if (e.touches && e.touches.length > 0) {
             return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+        if (e.changedTouches && e.changedTouches.length > 0) {
+             return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
         }
         return { x: e.clientX, y: e.clientY };
     }

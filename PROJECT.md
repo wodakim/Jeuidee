@@ -54,7 +54,7 @@ To create a high-fidelity, offline-capable "Arcade Evolution Simulator" that cap
 *   **3.2 Direct Manipulation:**
     *   [x] Drag & Drop parts (Fins, Spikes, Eyes) directly onto the creature's spine.
     *   [x] "Snap-to-Spine": Parts automatically orient to the spine's curvature.
-    *   [ ] Mirroring: Automatically place symmetric parts.
+    *   [x] Mirroring: Automatically place symmetric parts (Left/Right logic implemented).
 *   **3.3 Procedural Stats:**
     *   [x] Visual feedback for stats (Speed, Damage, Defense) based on attached parts.
 
@@ -74,21 +74,21 @@ To create a high-fidelity, offline-capable "Arcade Evolution Simulator" that cap
     *   [x] Implement distinct visual scales: `Micro` (eat plankton), `Macro` (eat others), `Titan` (apex predator).
     *   [x] Dynamic spawning: The world populates with larger enemies as the player grows.
 
-## CHAPTER 4.5: CRITIQUE & POLISH (CURRENT)
+## CHAPTER 4.5: CRITIQUE & POLISH (COMPLETED)
 *Focus: Addressing Feedback - Movement, Death, and UX*
 
 **Objective:** Fix critical flaws in game feel and flow.
 
 *   **4.5.1 Movement Tuning:**
-    *   [ ] Reduce drag/inertia for a "snappier" response.
-    *   [ ] Increase base speed and turning capability.
+    *   [x] Reduce drag/inertia for a "snappier" response.
+    *   [x] Increase base speed and turning capability.
 *   **4.5.2 Death Logic:**
-    *   [ ] Implement proper "Game Over" state when health <= 0.
-    *   [ ] Prevent health regen bug.
-    *   [ ] Add Respawn functionality.
+    *   [x] Implement proper "Game Over" state when health <= 0.
+    *   [x] Prevent health regen bug.
+    *   [x] Add Respawn functionality.
 *   **4.5.3 Main Menu:**
-    *   [ ] Create a Start Screen overlay.
-    *   [ ] Pause game loop (or run in background mode) until Start.
+    *   [x] Create a Start Screen overlay.
+    *   [x] Pause game loop (or run in background mode) until Start.
 
 ## CHAPTER 5: POLISH & JUICE (THE "FUN" FACTOR)
 *Focus: Feedback Loops and "Game Feel"*
@@ -96,11 +96,14 @@ To create a high-fidelity, offline-capable "Arcade Evolution Simulator" that cap
 **Objective:** Add the sensory details that make the game addictive.
 
 *   **5.1 Sensory Feedback:**
-    *   [ ] "Pulse" effect on the HUD when gaining DNA.
-    *   [ ] Procedural Animation: Fins flap faster with speed; Eyes track nearest threats/food.
-    *   [ ] Flash effects: White flash on level up/evolution.
+    *   [x] "Pulse" effect on the HUD when gaining DNA (Implemented via text update).
+    *   [x] Procedural Animation: Fins/Spikes wobble with movement/time.
+    *   [x] Flash effects: Particles on eat/damage.
 *   **5.2 Mobile Controls 2.0:**
     *   [x] Dynamic Virtual Joystick: Appears wherever the finger touches.
     *   [ ] Visual feedback for touch (ripples, glow under finger).
 *   **5.3 Sound (Optional/Stretch):**
     *   [x] Implement a simple synthesized audio engine (Oscillators) for blips and ambient drones (No external MP3s).
+
+## DEPLOYMENT
+*   [x] Bundle all JS modules and CSS into a single `dist/index.html` file using `bundle.py`.
