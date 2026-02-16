@@ -1,36 +1,113 @@
 export default class AudioSystem {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.masterVolume = 0.5;
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 0.5;
+        this.masterGain.connect(this.ctx.destination);
+
+        // Reverb / Echo
+        this.delay = this.ctx.createDelay();
+        this.delay.delayTime.value = 0.3; // 300ms echo
+        this.delayFeedback = this.ctx.createGain();
+        this.delayFeedback.gain.value = 0.4;
+        this.delayFilter = this.ctx.createBiquadFilter();
+        this.delayFilter.type = 'lowpass';
+        this.delayFilter.frequency.value = 1000; // Dampen echo
+
+        // Routing: Input -> Delay -> Feedback -> Input
+        this.delay.connect(this.delayFeedback);
+        this.delayFeedback.connect(this.delayFilter);
+        this.delayFilter.connect(this.delay);
+
+        // Connect Delay to Master (Wet Mix)
+        this.delay.connect(this.masterGain);
+
+        // Ambience
+        this.droneOsc = null;
+        this.startDrone();
     }
 
-    playTone(freq, type, duration) {
-        if (this.ctx.state === 'suspended') this.ctx.resume();
-
+    startDrone() {
+        // Deep Sea Drone (Low sine + modulation)
         const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 50;
+
+        const mod = this.ctx.createOscillator();
+        mod.type = 'sine';
+        mod.frequency.value = 0.1; // Slow throb
+
+        const modGain = this.ctx.createGain();
+        modGain.gain.value = 10;
+
+        mod.connect(modGain);
+        modGain.connect(osc.frequency);
+
         const gain = this.ctx.createGain();
-
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-
-        gain.gain.setValueAtTime(this.masterVolume, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        gain.gain.value = 0.1; // Quiet
 
         osc.connect(gain);
-        gain.connect(this.ctx.destination);
+        gain.connect(this.masterGain); // Direct to master, no reverb for clean bass
 
         osc.start();
-        osc.stop(this.ctx.currentTime + duration);
+        mod.start();
+
+        this.droneOsc = { osc, mod, gain };
     }
 
-    playEat() {
-        this.playTone(400 + Math.random()*200, 'sine', 0.1);
+    playTone(freq, type, duration, x = 0, y = 0, camera = null) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const panner = this.ctx.createStereoPanner();
+
+        // Spatial Audio Logic
+        if (camera) {
+            // Screen width is roughly camera.viewportWidth / camera.zoom
+            // Let's approximate. Center is camera.x, camera.y
+            const relX = (x - camera.x);
+            // Normalize roughly. View width varies.
+            // Let's assume view width ~1000 world units at zoom 1
+            const pan = Math.max(-1, Math.min(1, relX / (500 / camera.zoom)));
+            panner.pan.value = pan;
+        }
+
+        osc.type = type;
+        osc.frequency.value = freq;
+
+        osc.connect(gain);
+        gain.connect(panner);
+        panner.connect(this.masterGain);
+        panner.connect(this.delay); // Send to reverb
+
+        const now = this.ctx.currentTime;
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+        osc.start(now);
+        osc.stop(now + duration);
     }
 
-    playSwim() {
-        // Low bubbling noise?
-        // Hard with basic osc, maybe filtered noise.
-        // For now, simple low blip
-        // this.playTone(100, 'triangle', 0.2);
+    playEat(x, y, camera) {
+        this.playTone(300 + Math.random() * 200, 'triangle', 0.1, x, y, camera);
+        this.playTone(500 + Math.random() * 200, 'sine', 0.15, x, y, camera);
+    }
+
+    playDash() {
+        // White noise burst for dash?
+        // Simple sweep
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.3);
+
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.3);
     }
 }

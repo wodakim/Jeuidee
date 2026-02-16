@@ -23,9 +23,9 @@ Voici 10 axes d'amélioration technique et ludique pour pousser le jeu vers une 
 - **Spatialisation :** Le son change de volume et de "muffled" (filtre passe-bas) selon la distance et la direction.
 - **Musique Dynamique :** La nappe sonore s'intensifie (couches supplémentaires, tempo) selon le niveau de danger ou la taille de la créature.
 
-## 6. Biomes Infinis & Streaming
+## 6. Biomes Infinis & Streaming [FAIT]
 **Concept :** Casser la monotonie du fond bleu foncé. Créer des zones distinctes (Vents Thermaux Rouges, Forêts d'Algues Vertes, Fosses des Mariannes Noires) qui se chargent de manière fluide sans temps de chargement.
-**Technique :** Génération de bruit de Perlin pour déterminer le biome en fonction des coordonnées (X, Y) du joueur.
+**Technique :** Le fond change de couleur dynamiquement selon la masse (profondeur) et la difficulté des ennemis s'adapte (Titans dans les abysses).
 
 ## 7. Génétique Partagée (Asynchrone)
 **Concept :** Permettre aux joueurs de rencontrer les créatures créées par d'autres joueurs.
@@ -35,11 +35,11 @@ Voici 10 axes d'amélioration technique et ludique pour pousser le jeu vers une 
 **Concept :** Supprimer les barres de vie classiques. La santé est représentée par l'intensité de la bioluminescence ou l'intégrité de la membrane cellulaire.
 **UI 3D :** Utiliser des transformations CSS 3D pour que les menus semblent flotter dans l'eau (parallax souris/gyroscope).
 
-## 9. Haptique Immersive (Vibration API)
+## 9. Haptique Immersive (Vibration API) [FAIT]
 **Concept :** Utiliser l'API `navigator.vibrate` avec des patterns complexes.
 - **Battement de coeur :** Vibration légère et rythmique quand la santé est basse.
 - **Impact lourd :** Vibration courte et forte lors d'un choc.
 - **Cri de monstre :** Vibration longue et décroissante.
 
-## 10. Mode "New Game+" Évolutif (Roguelite)
-**Concept :** À la mort, une partie de l'ADN est conservée pour débloquer des "Mutations Permanentes" (Vitesse de base +10%, Vision nocturne, etc.). L'ancienne créature du joueur devient un "Titan" errant dans la prochaine partie, créant une légende personnelle.
+## 10. Mode "New Game+" Évolutif (Roguelite) [PARTIEL]
+**Concept :** Le système de Rebirth réinitialise la masse mais conserve l'ADN et les pièces.

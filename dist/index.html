@@ -258,37 +258,114 @@ h1 {
 class AudioSystem {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.masterVolume = 0.5;
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 0.5;
+        this.masterGain.connect(this.ctx.destination);
+
+        // Reverb / Echo
+        this.delay = this.ctx.createDelay();
+        this.delay.delayTime.value = 0.3; // 300ms echo
+        this.delayFeedback = this.ctx.createGain();
+        this.delayFeedback.gain.value = 0.4;
+        this.delayFilter = this.ctx.createBiquadFilter();
+        this.delayFilter.type = 'lowpass';
+        this.delayFilter.frequency.value = 1000; // Dampen echo
+
+        // Routing: Input -> Delay -> Feedback -> Input
+        this.delay.connect(this.delayFeedback);
+        this.delayFeedback.connect(this.delayFilter);
+        this.delayFilter.connect(this.delay);
+
+        // Connect Delay to Master (Wet Mix)
+        this.delay.connect(this.masterGain);
+
+        // Ambience
+        this.droneOsc = null;
+        this.startDrone();
     }
 
-    playTone(freq, type, duration) {
-        if (this.ctx.state === 'suspended') this.ctx.resume();
-
+    startDrone() {
+        // Deep Sea Drone (Low sine + modulation)
         const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 50;
+
+        const mod = this.ctx.createOscillator();
+        mod.type = 'sine';
+        mod.frequency.value = 0.1; // Slow throb
+
+        const modGain = this.ctx.createGain();
+        modGain.gain.value = 10;
+
+        mod.connect(modGain);
+        modGain.connect(osc.frequency);
+
         const gain = this.ctx.createGain();
-
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-
-        gain.gain.setValueAtTime(this.masterVolume, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        gain.gain.value = 0.1; // Quiet
 
         osc.connect(gain);
-        gain.connect(this.ctx.destination);
+        gain.connect(this.masterGain); // Direct to master, no reverb for clean bass
 
         osc.start();
-        osc.stop(this.ctx.currentTime + duration);
+        mod.start();
+
+        this.droneOsc = { osc, mod, gain };
     }
 
-    playEat() {
-        this.playTone(400 + Math.random()*200, 'sine', 0.1);
+    playTone(freq, type, duration, x = 0, y = 0, camera = null) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const panner = this.ctx.createStereoPanner();
+
+        // Spatial Audio Logic
+        if (camera) {
+            // Screen width is roughly camera.viewportWidth / camera.zoom
+            // Let's approximate. Center is camera.x, camera.y
+            const relX = (x - camera.x);
+            // Normalize roughly. View width varies.
+            // Let's assume view width ~1000 world units at zoom 1
+            const pan = Math.max(-1, Math.min(1, relX / (500 / camera.zoom)));
+            panner.pan.value = pan;
+        }
+
+        osc.type = type;
+        osc.frequency.value = freq;
+
+        osc.connect(gain);
+        gain.connect(panner);
+        panner.connect(this.masterGain);
+        panner.connect(this.delay); // Send to reverb
+
+        const now = this.ctx.currentTime;
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+        osc.start(now);
+        osc.stop(now + duration);
     }
 
-    playSwim() {
-        // Low bubbling noise?
-        // Hard with basic osc, maybe filtered noise.
-        // For now, simple low blip
-        // this.playTone(100, 'triangle', 0.2);
+    playEat(x, y, camera) {
+        this.playTone(300 + Math.random() * 200, 'triangle', 0.1, x, y, camera);
+        this.playTone(500 + Math.random() * 200, 'sine', 0.15, x, y, camera);
+    }
+
+    playDash() {
+        // White noise burst for dash?
+        // Simple sweep
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.3);
+
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.3);
     }
 }
 
@@ -421,27 +498,39 @@ class Stats {
         parts.forEach(part => {
             switch(part.type) {
                 case 'Fin':
-                    speedMod += 200; // Force units
+                    speedMod += 200;
                     turnMod += 1;
                     break;
                 case 'Spike':
                     damageMod += 10;
-                    defenseMod += 2; // Spikes hurt attacker
+                    defenseMod += 2;
                     break;
                 case 'Eye':
-                    // Zoom out view? Or just cosmetic for now?
-                    // Maybe 'Critical Hit Chance'
+                    // Enhanced vision (could affect zoom or food detection range)
                     break;
                 case 'Poison':
-                    damageMod += 5; // DoT logic later
+                    damageMod += 5; // Passive DoT
+                    defenseMod += 1; // Deterrent
+                    break;
+                case 'Tentacle':
+                    turnMod += 2; // Better maneuvering
+                    damageMod += 2; // Slight damage
+                    break;
+                case 'Shield':
+                    defenseMod += 15;
+                    speedMod -= 50; // Heavy
+                    break;
+                case 'Booster':
+                    speedMod += 400;
+                    turnMod -= 0.5; // Harder to steer
                     break;
             }
         });
 
-        this.speed = this.baseSpeed + speedMod;
+        this.speed = Math.max(100, this.baseSpeed + speedMod);
         this.damage = this.baseDamage + damageMod;
         this.defense = this.baseDefense + defenseMod;
-        this.turnSpeed = this.baseTurnSpeed + turnMod;
+        this.turnSpeed = Math.max(1, this.baseTurnSpeed + turnMod);
     }
 }
 
@@ -569,6 +658,87 @@ class Settings {
 }
 
 
+// --- js/assets.js ---
+class AssetGenerator {
+    constructor() {
+        this.cache = {};
+    }
+
+    get(key) {
+        if (!this.cache[key]) {
+            this.cache[key] = this.generate(key);
+        }
+        return this.cache[key];
+    }
+
+    generate(key) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        if (key === 'giant_worm') {
+            canvas.width = 500;
+            canvas.height = 200;
+            // Draw a segmented worm silhouette
+            ctx.fillStyle = 'rgba(20, 40, 60, 0.4)';
+            ctx.filter = 'blur(10px)'; // Blur once during generation
+
+            for (let i = 0; i < 10; i++) {
+                ctx.beginPath();
+                ctx.arc(50 + i * 40, 100, 40 - i * 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        else if (key === 'giant_jelly') {
+            canvas.width = 400;
+            canvas.height = 600;
+            ctx.fillStyle = 'rgba(30, 50, 70, 0.3)';
+            ctx.filter = 'blur(15px)';
+
+            // Head
+            ctx.beginPath();
+            ctx.arc(200, 150, 100, Math.PI, 0);
+            ctx.fill();
+
+            // Tentacles
+            ctx.lineWidth = 20;
+            ctx.strokeStyle = 'rgba(30, 50, 70, 0.2)';
+            for(let i=0; i<5; i++) {
+                ctx.beginPath();
+                ctx.moveTo(120 + i*40, 150);
+                ctx.quadraticCurveTo(120 + i*40 + (Math.random()-0.5)*50, 400, 120 + i*40, 550);
+                ctx.stroke();
+            }
+        }
+        else if (key === 'god_rays') {
+            canvas.width = 800;
+            canvas.height = 800;
+
+            // Radial Gradient Rays
+            const grad = ctx.createRadialGradient(400, 400, 0, 400, 400, 400);
+            grad.addColorStop(0, 'rgba(0, 255, 255, 0.05)');
+            grad.addColorStop(0.5, 'rgba(0, 200, 255, 0.02)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+            ctx.fillStyle = grad;
+            // Draw Star/Ray shape
+            for(let i=0; i<8; i++) {
+                ctx.save();
+                ctx.translate(400, 400);
+                ctx.rotate(i * (Math.PI / 4));
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(100, -400);
+                ctx.lineTo(-100, -400);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        return canvas;
+    }
+}
+
+
 // --- js/renderer.js ---
 class Renderer {
     constructor(ctx, camera, settings) {
@@ -582,13 +752,28 @@ class Renderer {
         if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
 
         const points = creature.points;
-        const color = creature.color || '#00ffff';
+        let color = creature.color || '#00ffff';
+
+        // Diegetic Health: Modulate color/intensity
+        const healthPct = creature.gameStats.health / creature.gameStats.maxHealth;
+
+        // Flash Red on Damage
+        if (creature.lastDamageTime && Date.now() - creature.lastDamageTime < 200) {
+            color = '#ff0000';
+        } else if (healthPct < 0.3) {
+            // Pulse Red when low
+            const pulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
+            color = pulse > 0.5 ? '#ff0000' : color;
+        }
 
         for (let i = points.length - 1; i >= 0; i--) {
             const p = points[i];
 
+            // Glow intensity based on health
+            const glowSize = 2.5 * (0.5 + 0.5 * healthPct);
+
             // Glow
-            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2.5);
+            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * glowSize);
             grad.addColorStop(0, color);
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
@@ -649,7 +834,13 @@ class Renderer {
     drawPart(type, x, y, spineAngle, side, radius, bodyColor) {
         this.ctx.save();
         this.ctx.translate(x, y);
-        this.ctx.rotate(spineAngle + (side === 1 ? Math.PI/2 : -Math.PI/2));
+
+        let sideAngle = 0;
+        if (side === 1) sideAngle = Math.PI/2;
+        else if (side === -1) sideAngle = -Math.PI/2;
+        // side 0 = 0 (Forward)
+
+        this.ctx.rotate(spineAngle + sideAngle);
 
         const wobble = Math.sin(Date.now() * 0.005) * 0.1;
         this.ctx.rotate(wobble);
@@ -680,8 +871,110 @@ class Renderer {
             this.ctx.lineTo(0, 8);
             this.ctx.fill();
             this.ctx.shadowBlur = 0;
+        } else if (type === 'Jaws') {
+            this.ctx.fillStyle = '#eee';
+            this.ctx.beginPath();
+            // Upper Jaw
+            this.ctx.moveTo(0, -10);
+            this.ctx.lineTo(25, -5);
+            this.ctx.lineTo(0, 0);
+            // Lower Jaw
+            this.ctx.moveTo(0, 10);
+            this.ctx.lineTo(25, 5);
+            this.ctx.lineTo(0, 0);
+            this.ctx.fill();
+
+            // Teeth
+            this.ctx.fillStyle = '#fff';
+            this.ctx.beginPath();
+            this.ctx.moveTo(10, -5); ctx.lineTo(15, -2); ctx.lineTo(20, -5);
+            this.ctx.moveTo(10, 5); ctx.lineTo(15, 2); ctx.lineTo(20, 5);
+            this.ctx.fill();
         } else if (type === 'Eye') {
-             // Eyes drawn in main loop
+            this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
+            this.ctx.fillStyle = 'white';
+            this.ctx.beginPath();
+            this.ctx.arc(12, 0, 6, 0, Math.PI*2);
+            this.ctx.fill();
+            this.ctx.fillStyle = 'black';
+            this.ctx.beginPath();
+            this.ctx.arc(14, 0, 2, 0, Math.PI*2); // Pupil
+            this.ctx.fill();
+        } else if (type === 'Tentacle') {
+            this.ctx.strokeStyle = '#a0f';
+            this.ctx.lineWidth = 4;
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#a0f';
+                this.ctx.shadowBlur = 10;
+            }
+
+            // AAA Proc-Gen Tentacle (Sine Wave Chain)
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, 0);
+
+            const t = Date.now() * 0.005;
+            // Simulate 4 segments trailing
+            let px = 0, py = 0;
+            for(let i=1; i<=5; i++) {
+                // Wave function based on time and segment index
+                // Adds a "whipping" motion
+                const wave = Math.sin(t + i * 0.5) * (i * 3);
+                const nx = i * 10;
+                const ny = wave;
+
+                this.ctx.lineTo(nx, ny);
+                px = nx; py = ny;
+            }
+            this.ctx.stroke();
+
+            // Bulb at end
+            this.ctx.fillStyle = '#d0f';
+            this.ctx.beginPath();
+            this.ctx.arc(px, py, 3, 0, Math.PI*2);
+            this.ctx.fill();
+
+            this.ctx.shadowBlur = 0;
+        } else if (type === 'Shield') {
+            this.ctx.fillStyle = '#444';
+            this.ctx.strokeStyle = '#888';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.arc(0, 0, 20, -Math.PI/2, Math.PI/2);
+            this.ctx.lineTo(0, 0);
+            this.ctx.fill();
+            this.ctx.stroke();
+        } else if (type === 'Booster') {
+            this.ctx.fillStyle = '#555';
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, -5);
+            this.ctx.lineTo(15, -8);
+            this.ctx.lineTo(15, 8);
+            this.ctx.lineTo(0, 5);
+            this.ctx.fill();
+            // Flame
+            if (Math.random() > 0.5) {
+                this.ctx.fillStyle = '#fa0';
+                this.ctx.beginPath();
+                this.ctx.moveTo(15, -5);
+                this.ctx.lineTo(25 + Math.random()*10, 0);
+                this.ctx.lineTo(15, 5);
+                this.ctx.fill();
+            }
+        } else if (type === 'Poison') {
+            this.ctx.fillStyle = '#0f0';
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#0f0';
+                this.ctx.shadowBlur = 15;
+            }
+            this.ctx.beginPath();
+            this.ctx.arc(10, 0, 8, 0, Math.PI*2);
+            this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+            // Bubbles
+            this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            this.ctx.beginPath();
+            this.ctx.arc(12 - Math.random()*4, -2 + Math.random()*4, 2, 0, Math.PI*2);
+            this.ctx.fill();
         }
 
         this.ctx.restore();
@@ -754,6 +1047,13 @@ const PARTS_DB = {
         stat: '+ Damage',
         unlocked: true, // Default
         cost: 5
+    },
+    'Jaws': {
+        name: 'Carnivore Jaw',
+        desc: 'Frontal weapon. High damage.',
+        stat: '++ Damage',
+        unlocked: true, // Default
+        cost: 10
     },
     'Eye': {
         name: 'Eye',
@@ -870,6 +1170,10 @@ class Input {
         this.angle = 0;
         this.distance = 0;
         this.maxDistance = 50;
+
+        this.lastTap = 0;
+        this.doubleTapDetected = false;
+
         this.setupListeners();
     }
 
@@ -902,6 +1206,12 @@ class Input {
         this.currX = x;
         this.currY = y;
         this.distance = 0;
+
+        const now = Date.now();
+        if (now - this.lastTap < 300) {
+            this.doubleTapDetected = true;
+        }
+        this.lastTap = now;
     }
 
     handleMove(x, y) {
@@ -927,6 +1237,14 @@ class Input {
             y: Math.sin(this.angle) * force
         };
     }
+
+    checkDoubleTap() {
+        if (this.doubleTapDetected) {
+            this.doubleTapDetected = false;
+            return true;
+        }
+        return false;
+    }
 }
 
 
@@ -934,14 +1252,15 @@ class Input {
 
 
 class Enemy {
-    constructor(x, y, difficulty, physics) {
+    constructor(x, y, difficulty, physics, type = 'hunter') {
         this.physics = physics;
         this.active = true;
         this.difficulty = difficulty; // 1 to 10+
+        this.type = type; // 'hunter', 'grazer', 'titan'
 
         // Procedural Generation
         this.scale = 1 + (difficulty * 0.2); // Growth
-        this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
+        this.color = type === 'grazer' ? `hsl(${100 + Math.random() * 50}, 70%, 50%)` : `hsl(${Math.random() * 360}, 70%, 50%)`;
 
         // Body
         this.points = [];
@@ -955,9 +1274,9 @@ class Enemy {
         this.stats.calculate(this.parts);
 
         // Base stats scaling
-        this.stats.speed = 300 + difficulty * 50;
+        this.stats.speed = (300 + difficulty * 50) * (type === 'grazer' ? 0.8 : 1.0);
         this.stats.damage = 5 + difficulty * 2;
-        this.health = 20 + difficulty * 10;
+        this.health = (20 + difficulty * 10) * (type === 'titan' ? 5 : 1);
         this.maxHealth = this.health;
 
         // AI State
@@ -965,11 +1284,14 @@ class Enemy {
         this.targetX = x;
         this.targetY = y;
         this.stateTimer = 0;
+
+        // Flocking
+        this.flockId = -1;
     }
 
     createBody(x, y) {
-        const segs = 3 + Math.floor(this.difficulty / 3);
-        const rad = 15 * this.scale;
+        const segs = this.type === 'titan' ? 10 : (3 + Math.floor(this.difficulty / 3));
+        const rad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
 
         for (let i = 0; i < segs; i++) {
             const p = this.physics.constructor.createPoint(x, y + i * rad, rad * (1 - i*0.1), 1 + this.difficulty * 0.5);
@@ -984,10 +1306,31 @@ class Enemy {
     }
 
     generateParts() {
+        if (this.type === 'grazer') {
+            // Grazers have fins mostly
+            this.parts.push({ type: 'Fin', boneIndex: 1, side: 1 });
+            this.parts.push({ type: 'Fin', boneIndex: 1, side: -1 });
+            return;
+        }
+
         const partCount = Math.floor(this.difficulty);
+        let hasWeapon = false;
+
+        // Jaws Chance (Frontal Weapon)
+        if (this.type !== 'grazer' && Math.random() > 0.6) {
+             this.parts.push({ type: 'Jaws', boneIndex: 0, side: 0 }); // Center head
+             hasWeapon = true;
+        }
 
         for(let i=0; i<partCount; i++) {
-            const type = Math.random() > 0.5 ? 'Fin' : 'Spike';
+            let type = Math.random() > 0.5 ? 'Fin' : 'Spike';
+
+            // Force weapon if none yet and last part
+            if (!hasWeapon && i === partCount - 1) {
+                type = 'Spike';
+            }
+            if (type === 'Spike') hasWeapon = true;
+
             const boneIndex = Math.floor(Math.random() * (this.points.length));
             const side = Math.random() > 0.5 ? 1 : -1;
 
@@ -1007,11 +1350,11 @@ class Enemy {
         // Steering
         let head = this.points[0];
         let dx = 0, dy = 0;
-        const distToPlayer = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
 
-        // Logic: if difficulty > player (proxy by scale?), chase.
-        // We don't know player stats here easily, so use distance or random behavior.
-        // Let's assume if dist < 400 * scale, react.
+        // Boids Logic overrides standard steering if in a flock and type is grazer
+        // This is handled by BoidManager, but we need to respect the result.
+        // Actually, let's allow BoidManager to modify position/velocity directly,
+        // and here we add the "Goal" steering (Chase/Flee/Wander).
 
         if (this.state === 'chase') {
             dx = playerHead.x - head.x;
@@ -1028,8 +1371,11 @@ class Enemy {
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
             const force = this.stats.speed * dt * dt; // Apply as impulse
-            head.x += (dx / dist) * force;
-            head.y += (dy / dist) * force;
+            // If grazer, reduce individual steering influence to let flocking work better
+            const weight = this.type === 'grazer' ? 0.3 : 1.0;
+
+            head.x += (dx / dist) * force * weight;
+            head.y += (dy / dist) * force * weight;
         }
 
         // Physics
@@ -1040,9 +1386,11 @@ class Enemy {
         this.stateTimer = Math.random() * 3 + 1;
 
         const dist = Math.hypot(playerHead.x - this.points[0].x, playerHead.y - this.points[0].y);
-        if (dist < 400 * this.scale) {
+        const aggroRange = this.type === 'grazer' ? 200 : 400 * this.scale;
+
+        if (dist < aggroRange) {
              // Aggressive if difficulty is high
-             if (this.difficulty > 3) this.state = 'chase';
+             if (this.type !== 'grazer' && this.difficulty > 3) this.state = 'chase';
              else this.state = 'flee';
         } else {
             this.state = 'wander';
@@ -1080,7 +1428,11 @@ class Enemy {
                  if (part.boneIndex === 0) ang += Math.PI;
              }
 
-             ctx.rotate(ang + (part.side===1?Math.PI/2:-Math.PI/2));
+             let sideAngle = 0;
+             if (part.side === 1) sideAngle = Math.PI/2;
+             else if (part.side === -1) sideAngle = -Math.PI/2;
+
+             ctx.rotate(ang + sideAngle);
              ctx.translate(bone.radius, 0);
 
              if(part.type === 'Fin') {
@@ -1094,6 +1446,12 @@ class Enemy {
                  ctx.beginPath();
                  ctx.moveTo(0, -5); ctx.lineTo(20, 0); ctx.lineTo(0, 5);
                  ctx.fill();
+             } else if (part.type === 'Jaws') {
+                 ctx.fillStyle = '#ccc';
+                 ctx.beginPath();
+                 ctx.moveTo(0, -10); ctx.lineTo(20, -5); ctx.lineTo(0, 0);
+                 ctx.moveTo(0, 10); ctx.lineTo(20, 5); ctx.lineTo(0, 0);
+                 ctx.fill();
              } else if (part.type === 'Eye') {
                  ctx.fillStyle = '#fff';
                  ctx.beginPath();
@@ -1105,6 +1463,158 @@ class Enemy {
                  ctx.fill();
              }
              ctx.restore();
+        });
+
+        ctx.restore();
+    }
+}
+
+
+// --- js/boids.js ---
+
+
+class BoidManager {
+    constructor(physics) {
+        this.physics = physics;
+        this.flocks = [];
+    }
+
+    createFlock(x, y, count, difficulty, type = 'grazer') {
+        const flock = [];
+        const flockId = Math.floor(Math.random() * 10000);
+        for (let i = 0; i < count; i++) {
+            // Spawn close to center
+            const ex = x + (Math.random() - 0.5) * 200;
+            const ey = y + (Math.random() - 0.5) * 200;
+            const enemy = new Enemy(ex, ey, difficulty, this.physics, type);
+            enemy.flockId = flockId;
+            flock.push(enemy);
+        }
+        this.flocks.push(flock);
+        return flock;
+    }
+
+    update(dt, enemies) {
+        const separationDist = 80;
+        const cohesionDist = 200;
+
+        enemies.forEach(e => {
+            if (e.type !== 'grazer') return;
+
+            let sepX = 0, sepY = 0;
+            let cohX = 0, cohY = 0;
+            let count = 0;
+
+            const head = e.points[0];
+
+            enemies.forEach(other => {
+                if (e === other || other.type !== 'grazer') return;
+                // Only flock with same flockId? Or all grazers? Let's say all grazers for now, or use flockId if we want distinct groups.
+                // Using flockId makes them stay in their spawn groups.
+                if (e.flockId !== other.flockId) return;
+
+                const otherHead = other.points[0];
+                const dist = Math.hypot(head.x - otherHead.x, head.y - otherHead.y);
+
+                if (dist < cohesionDist) {
+                    // Separation
+                    if (dist < separationDist && dist > 0) {
+                        sepX += (head.x - otherHead.x) / dist; // Push away
+                        sepY += (head.y - otherHead.y) / dist;
+                    }
+
+                    // Cohesion
+                    cohX += otherHead.x;
+                    cohY += otherHead.y;
+
+                    count++;
+                }
+            });
+
+            if (count > 0) {
+                // Apply forces (Soft Body impulse)
+                const sepForce = 8000; // Strong separation
+                head.x += sepX * sepForce * dt * dt;
+                head.y += sepY * sepForce * dt * dt;
+
+                // Cohesion
+                cohX /= count;
+                cohY /= count;
+                const cohDirX = cohX - head.x;
+                const cohDirY = cohY - head.y;
+                const cohForce = 200;
+
+                head.x += cohDirX * cohForce * dt * dt;
+                head.y += cohDirY * cohForce * dt * dt;
+            }
+        });
+    }
+}
+
+
+// --- js/debris.js ---
+class Debris {
+    constructor(points, constraints, color, life = 5) {
+        this.points = points;
+        this.constraints = constraints;
+        this.color = color;
+        this.life = life;
+        this.active = true;
+
+        // Tearing: Remove random constraints to simulate destruction
+        if (this.constraints.length > 2) {
+            const removeCount = Math.ceil(this.constraints.length * 0.4);
+            for(let i=0; i<removeCount; i++) {
+                const idx = Math.floor(Math.random() * this.constraints.length);
+                this.constraints.splice(idx, 1);
+            }
+        }
+
+        // Explosion Impulse
+        const center = this.getCenter();
+        this.points.forEach(p => {
+             const dx = p.x - center.x;
+             const dy = p.y - center.y;
+             const dist = Math.hypot(dx, dy) || 1;
+             const force = 100 * Math.random();
+             p.oldx -= (dx/dist) * force * 0.016; // Impulse
+             p.oldy -= (dy/dist) * force * 0.016;
+        });
+    }
+
+    getCenter() {
+        let x=0, y=0;
+        this.points.forEach(p => { x+=p.x; y+=p.y; });
+        return { x: x/this.points.length, y: y/this.points.length };
+    }
+
+    update(dt, physics) {
+        physics.update(this.points, this.constraints, dt);
+        this.life -= dt;
+        if (this.life <= 0) this.active = false;
+
+        // Fade out shrinking
+        if (this.life < 2) {
+             this.constraints.forEach(c => c.length *= 0.99);
+             this.points.forEach(p => p.radius *= 0.99);
+        }
+    }
+
+    render(ctx) {
+        if (!this.active) return;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, this.life * 0.5); // Start semi-transparent
+
+        // Render blobs around constraints
+        ctx.strokeStyle = this.color;
+        ctx.lineCap = 'round';
+
+        this.constraints.forEach(c => {
+            ctx.lineWidth = (c.p1.radius + c.p2.radius) * 0.8;
+            ctx.beginPath();
+            ctx.moveTo(c.p1.x, c.p1.y);
+            ctx.lineTo(c.p2.x, c.p2.y);
+            ctx.stroke();
         });
 
         ctx.restore();
@@ -1294,7 +1804,7 @@ class Editor {
     getClosestBone(pt) {
         const cam = this.game.camera;
         let closest = null;
-        let minDist = 50; // Snap radius in pixels (Screen Space)
+        let minDist = 60; // Increased snap radius for easier mobile use
 
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
@@ -1310,6 +1820,49 @@ class Editor {
         return closest;
     }
 
+    calcSide(closest, dragX, dragY) {
+        const bone = closest.point;
+        // Determine spine vector
+        let spineVec = { x: 0, y: 0 };
+
+        // Use neighbors to determine "Forward" along spine
+        if (closest.index === 0) {
+            // Head: Vector from next bone to head
+            const next = this.game.creature.points[1];
+            if (next) spineVec = { x: bone.x - next.x, y: bone.y - next.y };
+        } else if (closest.index === this.game.creature.points.length - 1) {
+            // Tail: Vector from prev bone to tail
+            const prev = this.game.creature.points[closest.index - 1];
+            if (prev) spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
+        } else {
+            // Body: Average of prev->bone and bone->next? Or just prev->next
+            const prev = this.game.creature.points[closest.index - 1];
+            const next = this.game.creature.points[closest.index + 1];
+            if (prev && next) spineVec = { x: next.x - prev.x, y: next.y - prev.y };
+        }
+
+        const len = Math.hypot(spineVec.x, spineVec.y) || 1;
+        spineVec.x /= len; spineVec.y /= len;
+
+        const dropWorld = this.game.camera.screenToWorld(dragX, dragY);
+        const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
+        const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
+        dropVec.x /= dropLen; dropVec.y /= dropLen;
+
+        // Dot Product
+        const dot = spineVec.x * dropVec.x + spineVec.y * dropVec.y;
+        // Cross Product (2D)
+        const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
+
+        // Logic:
+        // If Dot is high (> 0.7), we are "In Line" (Front/Back/Top) -> Side 0
+        // Else Left/Right
+
+        if (dot > 0.7) return 0; // Front/Center
+        if (cross > 0) return 1; // Left
+        return -1; // Right
+    }
+
     endDrag(e) {
         if (!this.isDragging) return;
         this.isDragging = false;
@@ -1321,9 +1874,9 @@ class Editor {
 
             // Check DNA cost (account for symmetry double cost?)
             let totalCost = cost;
-            if (this.symmetry && this.selectedPart !== 'Eye') totalCost *= 2;
-            // Eyes are special, usually placed in pairs on head, but let's allow single eyes or symmetry.
-            // Actually, if placing Eye on head (index 0), symmetry might mean two eyes.
+            const side = this.calcSide(closest, this.dragX, this.dragY);
+
+            if (this.symmetry && side !== 0) totalCost *= 2;
 
             if (this.game.creature.gameStats.dna < totalCost) {
                 // Feedback: Not enough DNA
@@ -1332,31 +1885,20 @@ class Editor {
                 return;
             }
 
-            // Determine Side
-            const bone = closest.point;
-            const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1];
-
-            let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
-            if (closest.index === 0) {
-                 spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
-            }
-
-            const dropWorld = this.game.camera.screenToWorld(this.dragX, this.dragY);
-            const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
-            const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
-            const side = cross > 0 ? 1 : -1;
-
             // Add Part
             this.addPart(this.selectedPart, closest.index, side);
 
-            // Symmetry
-            if (this.symmetry) {
+            // Symmetry (Only if not center)
+            if (this.symmetry && side !== 0) {
                 this.addPart(this.selectedPart, closest.index, -side);
             }
 
             this.game.creature.gameStats.dna -= totalCost;
             this.updateDNA();
             this.game.creature.stats.calculate(this.game.creature.parts);
+
+            // Haptic
+            if (navigator.vibrate) navigator.vibrate(50);
         }
 
         this.selectedPart = null;
@@ -1388,21 +1930,92 @@ class Editor {
         const pt = this.getEventPos(e);
         const cam = this.game.camera;
 
-        // Check Bone Selection
-        let clicked = null;
+        // 1. Check Part Selection (For Removal)
+        // Iterate parts backwards (topmost first)
+        const parts = this.game.creature.parts || [];
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const part = parts[i];
+            const bone = this.game.creature.points[part.boneIndex];
+            if (!bone) continue;
+
+            // Approximate part position on screen
+            // We need to replicate rotation logic... simpler: check distance to bone + offset
+            // Part is roughly at Bone + Radius * SideVector
+            // Let's just check if click is near Bone Surface in the direction of side
+            // This is complex. Simplified: If click is near bone AND not bone center?
+            // Actually, let's just use distance to Bone Center.
+            // If click is within Bone Radius * 2, checks if it's hitting a part?
+
+            // Better: Just check distance to Bone. If we click a bone, we show a menu "Remove Part"?
+            // Or cycle parts?
+            // User requested "Click part to remove".
+            // Let's iterate parts and calculate their world pos.
+
+            let angle = 0; // Logic for angle
+            // ... (Replicating render logic is hard here without duplicating code)
+            // Simplified:
+            // Just assume part is at bone. If we click bone, maybe show a list of attached parts to remove?
+            // Or simpler: If we click a bone, and it has parts, remove the last one?
+            // No, that's annoying.
+
+            // Let's implement a "Sell Mode" toggle or just hold-to-delete?
+            // User: "Tap to remove".
+            // Let's check distance to bone. If < Radius, it's bone select.
+            // If > Radius but < Radius + 40 (Part range), check angle?
+        }
+
+        // Simple Implementation:
+        // If click hits a Bone, check if there are parts attached to it.
+        // If yes, remove the most recent part on that bone and refund.
+        // If no, select bone for resizing.
+
+        let clickedBone = null;
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
             const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
-            if (dist < p.radius * cam.zoom * 2) {
-                clicked = { p, index, sp };
+            if (dist < p.radius * cam.zoom * 2.5) { // Hitbox slightly larger for parts
+                clickedBone = { p, index, sp, dist: dist };
             }
         });
 
-        if (clicked) {
-            this.selectedBone = clicked;
-            this.showResizeSlider(clicked);
+        if (clickedBone) {
+            // Check if we hit the bone center (Resize) or the edge (Part)
+            // Threshold: Radius * Zoom
+            const radiusScreen = clickedBone.p.radius * cam.zoom;
+
+            if (clickedBone.dist < radiusScreen * 0.8) {
+                // Center Hit -> Resize
+                this.selectedBone = clickedBone;
+                this.showResizeSlider(clickedBone);
+            } else {
+                // Edge Hit -> Try Remove Part
+                // Find parts on this bone
+                const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
+                if (boneParts.length > 0) {
+                    // Remove the last one
+                    const toRemove = boneParts[boneParts.length - 1];
+                    // Refund
+                    const cost = PARTS_DB[toRemove.type] ? PARTS_DB[toRemove.type].cost : 5;
+                    this.game.creature.gameStats.dna += Math.floor(cost * 0.5); // 50% refund
+
+                    // Remove from main list
+                    const idx = parts.indexOf(toRemove);
+                    if (idx > -1) parts.splice(idx, 1);
+
+                    this.updateDNA();
+                    this.game.creature.stats.calculate(this.game.creature.parts);
+
+                    // Feedback
+                    if (navigator.vibrate) navigator.vibrate(20);
+                    // Show floating text? (Maybe later)
+                    alert(`Sold ${toRemove.type} for ${Math.floor(cost*0.5)} DNA`);
+                } else {
+                    // No parts, select bone
+                    this.selectedBone = clickedBone;
+                    this.showResizeSlider(clickedBone);
+                }
+            }
         } else {
-            // Click outside bone -> Close slider
             this.selectedBone = null;
             this.hideResizeSlider();
         }
@@ -1486,10 +2099,7 @@ class Editor {
                 if (closest.index === 0) spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
 
                 // Determine Side
-                const dropWorld = this.game.camera.screenToWorld(this.dragX, this.dragY);
-                const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
-                const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
-                const side = cross > 0 ? 1 : -1;
+                const side = this.calcSide(closest, this.dragX, this.dragY);
 
                 // Calculate Angle
                 const spineAngle = Math.atan2(spineVec.y, spineVec.x) + (closest.index===0 ? Math.PI : 0);
@@ -1497,25 +2107,27 @@ class Editor {
                 // Render Ghost
                 ctx.save();
                 ctx.globalAlpha = 0.5; // Ghostly
-                // We need to use Renderer's drawPart logic but projected to screen...
-                // Actually easier to set transform to bone screen pos and draw.
                 const sp = closest.sp;
 
                 ctx.translate(sp.x, sp.y);
-                // Rotate based on Camera + Spine
-                // Camera rotation is 0 always in this game
-                ctx.rotate(spineAngle + (side === 1 ? Math.PI/2 : -Math.PI/2));
+
+                let sideAngle = 0;
+                if (side === 1) sideAngle = Math.PI/2;
+                else if (side === -1) sideAngle = -Math.PI/2;
+
+                ctx.rotate(spineAngle + sideAngle);
                 ctx.translate(bone.radius * this.game.camera.zoom, 0); // Offset by radius scaled
 
                 ctx.fillStyle = '#0ff';
                 if(this.selectedPart === 'Spike') ctx.fillStyle = '#f00';
+                if(side === 0) ctx.fillStyle = '#ff0'; // Highlight center placement
 
                 ctx.beginPath();
                 ctx.arc(0, 0, 10, 0, Math.PI*2); // Simple dot preview
                 ctx.fill();
 
-                // Draw Symmetry Ghost
-                if (this.symmetry) {
+                // Draw Symmetry Ghost (Only if not center)
+                if (this.symmetry && side !== 0) {
                     ctx.save();
                     ctx.translate(0, 0); // Reset local
                     // It's hard to inverse exact transform here without full logic.
@@ -1561,6 +2173,9 @@ class Editor {
 
 
 
+
+
+
 class GameLoop {
     constructor() {
         this.running = false;
@@ -1592,17 +2207,21 @@ class GameLoop {
 
         this.saveManager = new SaveManager(this);
         this.progression = new Progression(this.saveManager);
+        this.assets = new AssetGenerator();
+        this.boidManager = new BoidManager(this.physics);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
         // Ecosystem
-        this.bgAbyssal = []; // REMOVED GIANTS
+        this.bgAbyssal = [];
+        this.bgRays = { angle: 0 };
         this.bgDeep = [];
         this.bgMid = [];
         this.bgFore = [];
 
         this.enemies = [];
         this.food = [];
+        this.debris = [];
         this.particles = [];
         this.hitstop = 0;
         this.gameState = 'menu'; // menu, playing, gameover, paused
@@ -1739,6 +2358,9 @@ class GameLoop {
     triggerUnlock(partKey) {
         if (this.progression.unlock(partKey)) {
             this.pauseGame(true); // True = Unlock Mode
+            // Haptic Pattern
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
+
             const overlay = document.getElementById('unlock-overlay');
             const part = PARTS_DB[partKey];
             overlay.innerHTML = `
@@ -1846,7 +2468,7 @@ class GameLoop {
     respawn() {
         document.getElementById('game-over').style.display = 'none';
         this.creature.gameStats.health = this.creature.gameStats.maxHealth;
-        this.creature.gameStats.mass = Math.max(10, this.creature.gameStats.mass * 0.5);
+        this.creature.gameStats.mass = 10; // Reset to base size (Rebirth)
         this.saveManager.save();
         this.resetCreature();
         this.camera.x = 0;
@@ -1889,26 +2511,52 @@ class GameLoop {
     }
 
     spawnEnemies() {
-        const targetCount = 6;
+        const targetCount = 12 + Math.floor(this.creature.gameStats.mass / 50); // Scale population
         if (this.enemies.length >= targetCount) return;
-        const count = targetCount - this.enemies.length;
+
         const playerScale = Math.sqrt(this.creature.gameStats.mass / 10);
+        const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
+
+        // Spawn distance scales with player to prevent popping
+        const spawnDist = 1000 * Math.max(1, playerScale * 0.5) + 500;
+
         const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
         const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
-        for(let i=0; i<count; i++) {
-            const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 1000 + Math.random() * 1000;
-            const ex = playerX + Math.cos(angle) * dist;
-            const ey = playerY + Math.sin(angle) * dist;
-            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics));
+
+        const angle = Math.random() * Math.PI * 2;
+        const ex = playerX + Math.cos(angle) * spawnDist;
+        const ey = playerY + Math.sin(angle) * spawnDist;
+
+        // Biome Logic
+        if (difficulty > 8 && Math.random() < 0.1) {
+            // Abyss: Titan
+            this.enemies.push(new Enemy(ex, ey, difficulty * 1.5, this.physics, 'titan'));
+        } else if (Math.random() < 0.4) {
+            // Grazers (Flock)
+            const flockSize = 3 + Math.floor(Math.random() * 4);
+            const flock = this.boidManager.createFlock(ex, ey, flockSize, difficulty, 'grazer');
+            this.enemies.push(...flock);
+        } else {
+            // Hunters
+            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
         }
     }
 
     initBackground() {
         this.bgAbyssal = []; this.bgDeep = []; this.bgMid = []; this.bgFore = [];
 
-        // Removed Giants loop for performance
+        // AAA Optimization: Use Pre-rendered Sprites
+        for(let i=0; i<6; i++) {
+            this.bgAbyssal.push({
+                type: i % 2 === 0 ? 'giant_worm' : 'giant_jelly',
+                x: (Math.random() - 0.5) * 8000,
+                y: (Math.random() - 0.5) * 8000,
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 5,
+                scale: 2 + Math.random() * 2,
+                angle: Math.random() * Math.PI * 2
+            });
+        }
 
         for(let i=0; i<100; i++) this.bgDeep.push({ x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 6000, r: Math.random() * 4 + 2, alpha: Math.random() * 0.2 });
         for(let i=0; i<200; i++) this.bgMid.push({ x: (Math.random() - 0.5) * 4000, y: (Math.random() - 0.5) * 4000, r: Math.random() * 3, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, alpha: Math.random() * 0.3 });
@@ -1947,7 +2595,8 @@ class GameLoop {
     }
 
     updateBackgroundOnly(dt) {
-        this.bgDeep.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; }); // Actually deep has no velocity?
+        this.bgRays.angle += dt * 0.05;
+        this.bgAbyssal.forEach(g => { g.x += g.vx * dt; g.y += g.vy * dt; g.angle += dt * 0.01; });
         this.bgMid.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
         this.bgFore.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
     }
@@ -1986,38 +2635,78 @@ class GameLoop {
             this.headAngle += diff * turnSpeed * dt;
         }
 
+        // Dash Ability (Double Tap)
+        if (this.input.checkDoubleTap()) {
+            // Check if unlocked
+            if (this.progression.isUnlocked('Booster')) {
+                // Apply impulse
+                const dashForce = 5000 * scale;
+                head.x += Math.cos(this.headAngle) * dashForce * dt;
+                head.y += Math.sin(this.headAngle) * dashForce * dt;
+
+                this.spawnParticles(head.x, head.y, '#fff', 20, 300);
+                if(this.settings.audioEnabled) this.audio.playDash();
+                if(navigator.vibrate) navigator.vibrate(50); // Short haptic
+            }
+        }
+
         this.physics.update(this.creature.points, this.creature.constraints, dt);
         this.updateBackgroundOnly(dt);
         this.spawnEnemies();
+        this.boidManager.update(dt, this.enemies);
 
         const playerRadius = head.radius;
         for (let i = this.enemies.length - 1; i >= 0; i--) {
             const e = this.enemies[i];
             e.update(dt, head, playerRadius);
-            const collision = Physics.checkSoftBodyCollision(this.creature.points, e.points);
-            if (collision) {
-                const enemyDmg = e.stats.damage;
-                this.creature.gameStats.health -= Math.max(0, enemyDmg - this.creature.stats.defense);
-                e.health -= Math.max(0, this.creature.stats.damage);
+
+            // 1. Body Physics (Bounce) - No Damage yet, just displacement
+            Physics.checkSoftBodyCollision(this.creature.points, e.points);
+
+            // 2. Advanced Combat (Locational Damage)
+            const result = this.resolveCombat(this.creature, e);
+
+            if (result.hit) {
+                // Apply Damage
+                if (result.playerHit) {
+                     const dmg = Math.max(0, e.stats.damage - this.creature.stats.defense);
+                     this.creature.gameStats.health -= dmg;
+                     this.creature.lastDamageTime = Date.now();
+                     if (dmg > 0 && navigator.vibrate) navigator.vibrate(100);
+                }
+                if (result.enemyHit) {
+                     const dmg = Math.max(0, this.creature.stats.damage - e.stats.defense); // Base damage is low, mainly parts
+                     // Actually, if a specific part hit, we should use that part's damage?
+                     // For now, using stats.damage which aggregates part stats is fine,
+                     // BUT we only apply it if a WEAPON part hit.
+                     // The resolveCombat function returns 'enemyHit' ONLY if a weapon part hit.
+                     e.health -= dmg;
+                }
+
+                this.hitstop = 0.05;
                 const mx = (head.x + e.points[0].x) / 2;
                 const my = (head.y + e.points[0].y) / 2;
-                this.hitstop = 0.05;
                 this.spawnParticles(mx, my, '#ff0044', 5, 200);
-                if (e.health <= 0) {
-                     this.spawnParticles(mx, my, '#ffaa00', 20, 400);
-                     this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
 
-                     // Check Drop
+                // Camera Shake
+                this.camera.x += (Math.random()-0.5) * 10;
+                this.camera.y += (Math.random()-0.5) * 10;
+                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1, mx, my, this.camera);
+
+                if (e.health <= 0) {
+                     this.spawnParticles(mx, my, '#ffaa00', 10, 400);
+                     this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
+                     this.debris.push(new Debris(e.points, e.constraints, e.color, 4));
+                     if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
+
                      const drop = this.progression.checkDrop(null, e.difficulty);
                      if (drop) this.triggerUnlock(drop);
 
                      this.enemies.splice(i, 1);
                      continue;
                 }
-                this.camera.x += (Math.random()-0.5) * 10;
-                this.camera.y += (Math.random()-0.5) * 10;
-                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1);
             }
+
             const dist = Math.hypot(head.x - e.points[0].x, head.y - e.points[0].y);
             if (dist > 3000) this.enemies.splice(i, 1);
         }
@@ -2031,7 +2720,10 @@ class GameLoop {
                 this.creature.gameStats.dna += dnaValue;
                 this.creature.gameStats.mass += 0.5 * dnaValue;
                 this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
-                if(this.settings.audioEnabled) this.audio.playEat();
+
+                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera); // Spatial
+                if(navigator.vibrate) navigator.vibrate(20); // Light haptic
+
                 this.spawnParticles(f.x, f.y, f.color, 5, 100);
                 if (f.type !== 'meat') {
                      this.food.push({ x: head.x + (Math.random()-0.5)*1000, y: head.y + (Math.random()-0.5)*1000, radius: 5, color: '#0f0' });
@@ -2045,11 +2737,83 @@ class GameLoop {
         }
 
         this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
+
+        for (let i = this.debris.length - 1; i >= 0; i--) {
+            const d = this.debris[i];
+            d.update(dt, this.physics);
+            if (!d.active) this.debris.splice(i, 1);
+        }
+
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
             if (p.life <= 0) this.particles.splice(i, 1);
         }
+    }
+
+    resolveCombat(player, enemy) {
+        let result = { hit: false, playerHit: false, enemyHit: false };
+
+        // 1. Check Player Weapons vs Enemy Body
+        // Weapons: Spike, Jaws
+        const weaponParts = player.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws' || p.type === 'Poison');
+
+        for (let part of weaponParts) {
+            const bone = player.points[part.boneIndex];
+            if (!bone) continue;
+
+            // Calculate Tip Position (Approximate)
+            // Ideally we reuse the rotation logic from Renderer, but simpler here:
+            // Just assume it protrudes from the bone surface in the direction of the normal
+            // For simple soft bodies, normal is roughly (bone - prevBone).
+            // Let's use a simpler heuristic: Checks overlap of a "Weapon Hitbox"
+            // Weapon Hitbox = Circle at bone position with radius + 20.
+
+            const range = bone.radius + 20;
+
+            for (let ePoint of enemy.points) {
+                const dist = Math.hypot(bone.x - ePoint.x, bone.y - ePoint.y);
+                if (dist < range + ePoint.radius) {
+                    result.hit = true;
+                    result.enemyHit = true;
+                    // Knockback Enemy
+                    const angle = Math.atan2(ePoint.y - bone.y, ePoint.x - bone.x);
+                    ePoint.x += Math.cos(angle) * 10;
+                    ePoint.y += Math.sin(angle) * 10;
+                    break;
+                }
+            }
+            if (result.enemyHit) break;
+        }
+
+        // 2. Check Enemy Weapons vs Player Body
+        const enemyWeapons = enemy.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws');
+        for (let part of enemyWeapons) {
+            const bone = enemy.points[part.boneIndex];
+            if (!bone) continue;
+            const range = bone.radius + 20;
+
+            for (let pPoint of player.points) {
+                const dist = Math.hypot(bone.x - pPoint.x, bone.y - pPoint.y);
+                if (dist < range + pPoint.radius) {
+                    result.hit = true;
+                    result.playerHit = true;
+                     // Knockback Player
+                    const angle = Math.atan2(pPoint.y - bone.y, pPoint.x - bone.x);
+                    pPoint.x += Math.cos(angle) * 10;
+                    pPoint.y += Math.sin(angle) * 10;
+                    break;
+                }
+            }
+            if (result.playerHit) break;
+        }
+
+        // 3. Fallback: If bodies are touching deeply but no weapons, maybe minor friction damage?
+        // Or just bounce (handled by checkSoftBodyCollision).
+        // User requested: "If I charge without a spike, I shouldn't hurt them".
+        // So we do NOT set enemyHit = true for body collisions.
+
+        return result;
     }
 
     spawnParticles(x, y, color, count, speedVar = 100) {
@@ -2064,13 +2828,53 @@ class GameLoop {
     }
 
     render() {
+        // Dynamic Background based on Mass (Depth)
+        const depth = Math.min(1, this.creature.gameStats.mass / 500);
+
+        // Interpolate Color: Dark Blue -> Abyss Black
+        // Top: #000510 -> #000000
+        // Bottom: #001020 -> #100010 (Purple tint)
+
+        const r1 = 0, g1 = Math.floor(5 * (1-depth)), b1 = Math.floor(16 * (1-depth));
+        const r2 = Math.floor(16 * depth), g2 = 0, b2 = Math.floor(32 * (1-depth*0.5));
+
+        const col1 = `rgb(${r1},${g1},${b1})`;
+        const col2 = `rgb(${r2},${g2},${b2})`;
+
         const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
-        bgGrad.addColorStop(0, '#000510'); bgGrad.addColorStop(1, '#001020');
+        bgGrad.addColorStop(0, col1); bgGrad.addColorStop(1, col2);
         this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
 
-        // --- LAYER 0: ABYSSAL GIANTS (REMOVED) ---
-        // Optimization: Giant layer completely removed per request
+        // --- LAYER 0: GOD RAYS (Parallax 0.0) ---
+        if (this.settings.fxEnabled) {
+            const rays = this.assets.get('god_rays');
+            this.ctx.save();
+            this.ctx.translate(this.width/2, this.height/2);
+            this.ctx.rotate(this.bgRays.angle);
+            this.ctx.scale(3, 3);
+            this.ctx.translate(-400, -400); // Center image
+            this.ctx.drawImage(rays, 0, 0);
+            this.ctx.restore();
+        }
 
+        // --- LAYER 1: ABYSSAL GIANTS (Parallax 0.05) ---
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
+
+        this.bgAbyssal.forEach(g => {
+            const sprite = this.assets.get(g.type);
+            this.ctx.save();
+            this.ctx.translate(g.x, g.y);
+            this.ctx.rotate(g.angle);
+            this.ctx.scale(g.scale, g.scale);
+            this.ctx.drawImage(sprite, -sprite.width/2, -sprite.height/2);
+            this.ctx.restore();
+        });
+        this.ctx.restore();
+
+        // --- LAYER 2: DEEP PARTICLES (Parallax 0.1) ---
         this.ctx.save();
         this.ctx.translate(this.width/2, this.height/2);
         this.ctx.scale(this.camera.zoom, this.camera.zoom);
@@ -2099,6 +2903,8 @@ class GameLoop {
         });
         this.ctx.globalCompositeOperation = 'source-over';
 
+        this.debris.forEach(d => d.render(this.ctx)); // Render debris under particles/enemies? Or maybe under food?
+
         this.particles.forEach(p => { this.ctx.globalAlpha = p.life * 2; this.ctx.fillStyle = p.color; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); this.ctx.fill(); });
         this.ctx.globalAlpha = 1.0;
 
@@ -2106,12 +2912,9 @@ class GameLoop {
 
         if (this.gameState === 'playing' || this.gameState === 'paused') {
             this.renderer.drawCreature(this.creature, this.headAngle);
-            const head = this.creature.points[0];
-            const scale = head.radius / head.baseRadius;
-            this.ctx.fillStyle = '#333';
-            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale, 5 * scale);
-            this.ctx.fillStyle = this.creature.gameStats.health < 20 ? '#f00' : '#0f0';
-            this.ctx.fillRect(head.x - 20 * scale, head.y - 40 * scale, 40 * scale * (Math.max(0, this.creature.gameStats.health) / 100), 5 * scale);
+
+            // Diegetic UI: Removed Health Bar
+            // Health is now visualized via creature glow/color in Renderer
         }
 
         this.camera.restore(this.ctx);

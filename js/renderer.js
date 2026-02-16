@@ -10,13 +10,28 @@ export default class Renderer {
         if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
 
         const points = creature.points;
-        const color = creature.color || '#00ffff';
+        let color = creature.color || '#00ffff';
+
+        // Diegetic Health: Modulate color/intensity
+        const healthPct = creature.gameStats.health / creature.gameStats.maxHealth;
+
+        // Flash Red on Damage
+        if (creature.lastDamageTime && Date.now() - creature.lastDamageTime < 200) {
+            color = '#ff0000';
+        } else if (healthPct < 0.3) {
+            // Pulse Red when low
+            const pulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
+            color = pulse > 0.5 ? '#ff0000' : color;
+        }
 
         for (let i = points.length - 1; i >= 0; i--) {
             const p = points[i];
 
+            // Glow intensity based on health
+            const glowSize = 2.5 * (0.5 + 0.5 * healthPct);
+
             // Glow
-            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * 2.5);
+            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * glowSize);
             grad.addColorStop(0, color);
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
@@ -77,7 +92,13 @@ export default class Renderer {
     drawPart(type, x, y, spineAngle, side, radius, bodyColor) {
         this.ctx.save();
         this.ctx.translate(x, y);
-        this.ctx.rotate(spineAngle + (side === 1 ? Math.PI/2 : -Math.PI/2));
+
+        let sideAngle = 0;
+        if (side === 1) sideAngle = Math.PI/2;
+        else if (side === -1) sideAngle = -Math.PI/2;
+        // side 0 = 0 (Forward)
+
+        this.ctx.rotate(spineAngle + sideAngle);
 
         const wobble = Math.sin(Date.now() * 0.005) * 0.1;
         this.ctx.rotate(wobble);
@@ -108,8 +129,110 @@ export default class Renderer {
             this.ctx.lineTo(0, 8);
             this.ctx.fill();
             this.ctx.shadowBlur = 0;
+        } else if (type === 'Jaws') {
+            this.ctx.fillStyle = '#eee';
+            this.ctx.beginPath();
+            // Upper Jaw
+            this.ctx.moveTo(0, -10);
+            this.ctx.lineTo(25, -5);
+            this.ctx.lineTo(0, 0);
+            // Lower Jaw
+            this.ctx.moveTo(0, 10);
+            this.ctx.lineTo(25, 5);
+            this.ctx.lineTo(0, 0);
+            this.ctx.fill();
+
+            // Teeth
+            this.ctx.fillStyle = '#fff';
+            this.ctx.beginPath();
+            this.ctx.moveTo(10, -5); ctx.lineTo(15, -2); ctx.lineTo(20, -5);
+            this.ctx.moveTo(10, 5); ctx.lineTo(15, 2); ctx.lineTo(20, 5);
+            this.ctx.fill();
         } else if (type === 'Eye') {
-             // Eyes drawn in main loop
+            this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
+            this.ctx.fillStyle = 'white';
+            this.ctx.beginPath();
+            this.ctx.arc(12, 0, 6, 0, Math.PI*2);
+            this.ctx.fill();
+            this.ctx.fillStyle = 'black';
+            this.ctx.beginPath();
+            this.ctx.arc(14, 0, 2, 0, Math.PI*2); // Pupil
+            this.ctx.fill();
+        } else if (type === 'Tentacle') {
+            this.ctx.strokeStyle = '#a0f';
+            this.ctx.lineWidth = 4;
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#a0f';
+                this.ctx.shadowBlur = 10;
+            }
+
+            // AAA Proc-Gen Tentacle (Sine Wave Chain)
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, 0);
+
+            const t = Date.now() * 0.005;
+            // Simulate 4 segments trailing
+            let px = 0, py = 0;
+            for(let i=1; i<=5; i++) {
+                // Wave function based on time and segment index
+                // Adds a "whipping" motion
+                const wave = Math.sin(t + i * 0.5) * (i * 3);
+                const nx = i * 10;
+                const ny = wave;
+
+                this.ctx.lineTo(nx, ny);
+                px = nx; py = ny;
+            }
+            this.ctx.stroke();
+
+            // Bulb at end
+            this.ctx.fillStyle = '#d0f';
+            this.ctx.beginPath();
+            this.ctx.arc(px, py, 3, 0, Math.PI*2);
+            this.ctx.fill();
+
+            this.ctx.shadowBlur = 0;
+        } else if (type === 'Shield') {
+            this.ctx.fillStyle = '#444';
+            this.ctx.strokeStyle = '#888';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.arc(0, 0, 20, -Math.PI/2, Math.PI/2);
+            this.ctx.lineTo(0, 0);
+            this.ctx.fill();
+            this.ctx.stroke();
+        } else if (type === 'Booster') {
+            this.ctx.fillStyle = '#555';
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, -5);
+            this.ctx.lineTo(15, -8);
+            this.ctx.lineTo(15, 8);
+            this.ctx.lineTo(0, 5);
+            this.ctx.fill();
+            // Flame
+            if (Math.random() > 0.5) {
+                this.ctx.fillStyle = '#fa0';
+                this.ctx.beginPath();
+                this.ctx.moveTo(15, -5);
+                this.ctx.lineTo(25 + Math.random()*10, 0);
+                this.ctx.lineTo(15, 5);
+                this.ctx.fill();
+            }
+        } else if (type === 'Poison') {
+            this.ctx.fillStyle = '#0f0';
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#0f0';
+                this.ctx.shadowBlur = 15;
+            }
+            this.ctx.beginPath();
+            this.ctx.arc(10, 0, 8, 0, Math.PI*2);
+            this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+            // Bubbles
+            this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            this.ctx.beginPath();
+            this.ctx.arc(12 - Math.random()*4, -2 + Math.random()*4, 2, 0, Math.PI*2);
+            this.ctx.fill();
         }
 
         this.ctx.restore();

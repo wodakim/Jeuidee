@@ -9,6 +9,10 @@ export default class Input {
         this.angle = 0;
         this.distance = 0;
         this.maxDistance = 50;
+
+        this.lastTap = 0;
+        this.doubleTapDetected = false;
+
         this.setupListeners();
     }
 
@@ -41,6 +45,12 @@ export default class Input {
         this.currX = x;
         this.currY = y;
         this.distance = 0;
+
+        const now = Date.now();
+        if (now - this.lastTap < 300) {
+            this.doubleTapDetected = true;
+        }
+        this.lastTap = now;
     }
 
     handleMove(x, y) {
@@ -65,5 +75,13 @@ export default class Input {
             x: Math.cos(this.angle) * force,
             y: Math.sin(this.angle) * force
         };
+    }
+
+    checkDoubleTap() {
+        if (this.doubleTapDetected) {
+            this.doubleTapDetected = false;
+            return true;
+        }
+        return false;
     }
 }

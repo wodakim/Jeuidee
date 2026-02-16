@@ -21,26 +21,38 @@ export default class Stats {
         parts.forEach(part => {
             switch(part.type) {
                 case 'Fin':
-                    speedMod += 200; // Force units
+                    speedMod += 200;
                     turnMod += 1;
                     break;
                 case 'Spike':
                     damageMod += 10;
-                    defenseMod += 2; // Spikes hurt attacker
+                    defenseMod += 2;
                     break;
                 case 'Eye':
-                    // Zoom out view? Or just cosmetic for now?
-                    // Maybe 'Critical Hit Chance'
+                    // Enhanced vision (could affect zoom or food detection range)
                     break;
                 case 'Poison':
-                    damageMod += 5; // DoT logic later
+                    damageMod += 5; // Passive DoT
+                    defenseMod += 1; // Deterrent
+                    break;
+                case 'Tentacle':
+                    turnMod += 2; // Better maneuvering
+                    damageMod += 2; // Slight damage
+                    break;
+                case 'Shield':
+                    defenseMod += 15;
+                    speedMod -= 50; // Heavy
+                    break;
+                case 'Booster':
+                    speedMod += 400;
+                    turnMod -= 0.5; // Harder to steer
                     break;
             }
         });
 
-        this.speed = this.baseSpeed + speedMod;
+        this.speed = Math.max(100, this.baseSpeed + speedMod);
         this.damage = this.baseDamage + damageMod;
         this.defense = this.baseDefense + defenseMod;
-        this.turnSpeed = this.baseTurnSpeed + turnMod;
+        this.turnSpeed = Math.max(1, this.baseTurnSpeed + turnMod);
     }
 }
