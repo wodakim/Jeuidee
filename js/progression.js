@@ -13,6 +13,13 @@ const PARTS_DB = {
         unlocked: true, // Default
         cost: 5
     },
+    'Jaws': {
+        name: 'Carnivore Jaw',
+        desc: 'Frontal weapon. High damage.',
+        stat: '++ Damage',
+        unlocked: true, // Default
+        cost: 10
+    },
     'Eye': {
         name: 'Eye',
         desc: 'Increases Field of View.',

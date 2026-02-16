@@ -9,11 +9,14 @@ def bundle():
         'js/stats.js',
         'js/camera.js',
         'js/settings.js',
+        'js/assets.js',
         'js/renderer.js',
         'js/save_manager.js',
         'js/progression.js',
         'js/input.js',
         'js/enemy.js',
+        'js/boids.js',
+        'js/debris.js',
         'js/editor.js',
         'js/gameloop.js'
     ]

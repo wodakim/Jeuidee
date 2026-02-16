@@ -179,7 +179,7 @@ export default class Editor {
     getClosestBone(pt) {
         const cam = this.game.camera;
         let closest = null;
-        let minDist = 50; // Snap radius in pixels (Screen Space)
+        let minDist = 60; // Increased snap radius for easier mobile use
 
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
@@ -195,6 +195,49 @@ export default class Editor {
         return closest;
     }
 
+    calcSide(closest, dragX, dragY) {
+        const bone = closest.point;
+        // Determine spine vector
+        let spineVec = { x: 0, y: 0 };
+
+        // Use neighbors to determine "Forward" along spine
+        if (closest.index === 0) {
+            // Head: Vector from next bone to head
+            const next = this.game.creature.points[1];
+            if (next) spineVec = { x: bone.x - next.x, y: bone.y - next.y };
+        } else if (closest.index === this.game.creature.points.length - 1) {
+            // Tail: Vector from prev bone to tail
+            const prev = this.game.creature.points[closest.index - 1];
+            if (prev) spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
+        } else {
+            // Body: Average of prev->bone and bone->next? Or just prev->next
+            const prev = this.game.creature.points[closest.index - 1];
+            const next = this.game.creature.points[closest.index + 1];
+            if (prev && next) spineVec = { x: next.x - prev.x, y: next.y - prev.y };
+        }
+
+        const len = Math.hypot(spineVec.x, spineVec.y) || 1;
+        spineVec.x /= len; spineVec.y /= len;
+
+        const dropWorld = this.game.camera.screenToWorld(dragX, dragY);
+        const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
+        const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
+        dropVec.x /= dropLen; dropVec.y /= dropLen;
+
+        // Dot Product
+        const dot = spineVec.x * dropVec.x + spineVec.y * dropVec.y;
+        // Cross Product (2D)
+        const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
+
+        // Logic:
+        // If Dot is high (> 0.7), we are "In Line" (Front/Back/Top) -> Side 0
+        // Else Left/Right
+
+        if (dot > 0.7) return 0; // Front/Center
+        if (cross > 0) return 1; // Left
+        return -1; // Right
+    }
+
     endDrag(e) {
         if (!this.isDragging) return;
         this.isDragging = false;
@@ -206,9 +249,9 @@ export default class Editor {
 
             // Check DNA cost (account for symmetry double cost?)
             let totalCost = cost;
-            if (this.symmetry && this.selectedPart !== 'Eye') totalCost *= 2;
-            // Eyes are special, usually placed in pairs on head, but let's allow single eyes or symmetry.
-            // Actually, if placing Eye on head (index 0), symmetry might mean two eyes.
+            const side = this.calcSide(closest, this.dragX, this.dragY);
+
+            if (this.symmetry && side !== 0) totalCost *= 2;
 
             if (this.game.creature.gameStats.dna < totalCost) {
                 // Feedback: Not enough DNA
@@ -217,31 +260,20 @@ export default class Editor {
                 return;
             }
 
-            // Determine Side
-            const bone = closest.point;
-            const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1];
-
-            let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
-            if (closest.index === 0) {
-                 spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
-            }
-
-            const dropWorld = this.game.camera.screenToWorld(this.dragX, this.dragY);
-            const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
-            const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
-            const side = cross > 0 ? 1 : -1;
-
             // Add Part
             this.addPart(this.selectedPart, closest.index, side);
 
-            // Symmetry
-            if (this.symmetry) {
+            // Symmetry (Only if not center)
+            if (this.symmetry && side !== 0) {
                 this.addPart(this.selectedPart, closest.index, -side);
             }
 
             this.game.creature.gameStats.dna -= totalCost;
             this.updateDNA();
             this.game.creature.stats.calculate(this.game.creature.parts);
+
+            // Haptic
+            if (navigator.vibrate) navigator.vibrate(50);
         }
 
         this.selectedPart = null;
@@ -273,21 +305,92 @@ export default class Editor {
         const pt = this.getEventPos(e);
         const cam = this.game.camera;
 
-        // Check Bone Selection
-        let clicked = null;
+        // 1. Check Part Selection (For Removal)
+        // Iterate parts backwards (topmost first)
+        const parts = this.game.creature.parts || [];
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const part = parts[i];
+            const bone = this.game.creature.points[part.boneIndex];
+            if (!bone) continue;
+
+            // Approximate part position on screen
+            // We need to replicate rotation logic... simpler: check distance to bone + offset
+            // Part is roughly at Bone + Radius * SideVector
+            // Let's just check if click is near Bone Surface in the direction of side
+            // This is complex. Simplified: If click is near bone AND not bone center?
+            // Actually, let's just use distance to Bone Center.
+            // If click is within Bone Radius * 2, checks if it's hitting a part?
+
+            // Better: Just check distance to Bone. If we click a bone, we show a menu "Remove Part"?
+            // Or cycle parts?
+            // User requested "Click part to remove".
+            // Let's iterate parts and calculate their world pos.
+
+            let angle = 0; // Logic for angle
+            // ... (Replicating render logic is hard here without duplicating code)
+            // Simplified:
+            // Just assume part is at bone. If we click bone, maybe show a list of attached parts to remove?
+            // Or simpler: If we click a bone, and it has parts, remove the last one?
+            // No, that's annoying.
+
+            // Let's implement a "Sell Mode" toggle or just hold-to-delete?
+            // User: "Tap to remove".
+            // Let's check distance to bone. If < Radius, it's bone select.
+            // If > Radius but < Radius + 40 (Part range), check angle?
+        }
+
+        // Simple Implementation:
+        // If click hits a Bone, check if there are parts attached to it.
+        // If yes, remove the most recent part on that bone and refund.
+        // If no, select bone for resizing.
+
+        let clickedBone = null;
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
             const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
-            if (dist < p.radius * cam.zoom * 2) {
-                clicked = { p, index, sp };
+            if (dist < p.radius * cam.zoom * 2.5) { // Hitbox slightly larger for parts
+                clickedBone = { p, index, sp, dist: dist };
             }
         });
 
-        if (clicked) {
-            this.selectedBone = clicked;
-            this.showResizeSlider(clicked);
+        if (clickedBone) {
+            // Check if we hit the bone center (Resize) or the edge (Part)
+            // Threshold: Radius * Zoom
+            const radiusScreen = clickedBone.p.radius * cam.zoom;
+
+            if (clickedBone.dist < radiusScreen * 0.8) {
+                // Center Hit -> Resize
+                this.selectedBone = clickedBone;
+                this.showResizeSlider(clickedBone);
+            } else {
+                // Edge Hit -> Try Remove Part
+                // Find parts on this bone
+                const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
+                if (boneParts.length > 0) {
+                    // Remove the last one
+                    const toRemove = boneParts[boneParts.length - 1];
+                    // Refund
+                    const cost = PARTS_DB[toRemove.type] ? PARTS_DB[toRemove.type].cost : 5;
+                    this.game.creature.gameStats.dna += Math.floor(cost * 0.5); // 50% refund
+
+                    // Remove from main list
+                    const idx = parts.indexOf(toRemove);
+                    if (idx > -1) parts.splice(idx, 1);
+
+                    this.updateDNA();
+                    this.game.creature.stats.calculate(this.game.creature.parts);
+
+                    // Feedback
+                    if (navigator.vibrate) navigator.vibrate(20);
+                    // Show floating text? (Maybe later)
+                    alert(`Sold ${toRemove.type} for ${Math.floor(cost*0.5)} DNA`);
+                } else {
+                    // No parts, select bone
+                    this.selectedBone = clickedBone;
+                    this.showResizeSlider(clickedBone);
+                }
+            }
         } else {
-            // Click outside bone -> Close slider
             this.selectedBone = null;
             this.hideResizeSlider();
         }
@@ -371,10 +474,7 @@ export default class Editor {
                 if (closest.index === 0) spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
 
                 // Determine Side
-                const dropWorld = this.game.camera.screenToWorld(this.dragX, this.dragY);
-                const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
-                const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
-                const side = cross > 0 ? 1 : -1;
+                const side = this.calcSide(closest, this.dragX, this.dragY);
 
                 // Calculate Angle
                 const spineAngle = Math.atan2(spineVec.y, spineVec.x) + (closest.index===0 ? Math.PI : 0);
@@ -382,25 +482,27 @@ export default class Editor {
                 // Render Ghost
                 ctx.save();
                 ctx.globalAlpha = 0.5; // Ghostly
-                // We need to use Renderer's drawPart logic but projected to screen...
-                // Actually easier to set transform to bone screen pos and draw.
                 const sp = closest.sp;
 
                 ctx.translate(sp.x, sp.y);
-                // Rotate based on Camera + Spine
-                // Camera rotation is 0 always in this game
-                ctx.rotate(spineAngle + (side === 1 ? Math.PI/2 : -Math.PI/2));
+
+                let sideAngle = 0;
+                if (side === 1) sideAngle = Math.PI/2;
+                else if (side === -1) sideAngle = -Math.PI/2;
+
+                ctx.rotate(spineAngle + sideAngle);
                 ctx.translate(bone.radius * this.game.camera.zoom, 0); // Offset by radius scaled
 
                 ctx.fillStyle = '#0ff';
                 if(this.selectedPart === 'Spike') ctx.fillStyle = '#f00';
+                if(side === 0) ctx.fillStyle = '#ff0'; // Highlight center placement
 
                 ctx.beginPath();
                 ctx.arc(0, 0, 10, 0, Math.PI*2); // Simple dot preview
                 ctx.fill();
 
-                // Draw Symmetry Ghost
-                if (this.symmetry) {
+                // Draw Symmetry Ghost (Only if not center)
+                if (this.symmetry && side !== 0) {
                     ctx.save();
                     ctx.translate(0, 0); // Reset local
                     // It's hard to inverse exact transform here without full logic.
