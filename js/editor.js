@@ -172,6 +172,28 @@ export default class Editor {
     exitPetriMode() {
         const target = this.game.creature;
 
+        // --- SPAWN ALLY (Old Evolution) ---
+        // Capture the state BEFORE applying changes
+        if (target.points.length > 0) {
+            const oldData = {
+                parts: JSON.parse(JSON.stringify(target.parts)),
+                points: target.points.map(p => ({
+                    x: p.x, y: p.y,
+                    baseRadius: p.baseRadius,
+                    mass: p.mass,
+                    radius: p.radius
+                })),
+                gameStats: { ...target.gameStats },
+                color: target.color
+            };
+
+            const startX = target.points[0].x;
+            const startY = target.points[0].y;
+
+            this.game.spawnAlly(oldData, startX, startY);
+        }
+        // ----------------------------------
+
         // Copy Parts
         target.parts = JSON.parse(JSON.stringify(this.clone.parts));
 
@@ -510,7 +532,6 @@ export default class Editor {
         ctx.beginPath();
         ctx.arc(0, 0, DISH_RADIUS, 0, Math.PI*2);
         ctx.stroke();
-        ctx.restore();
 
         // Render Clone Creature
         if (this.clone) {
@@ -518,6 +539,8 @@ export default class Editor {
             ctx.globalCompositeOperation = 'source-over';
             this.game.renderer.drawCreature(this.clone, -Math.PI/2); // Head pointing up
         }
+
+        ctx.restore();
 
         if (this.selectedBone) {
             const cam = this.game.camera;

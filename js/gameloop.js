@@ -20,6 +20,7 @@ import SkillManager from './skills.js';
 import Distortion from './distortion.js';
 import Boss from './boss.js';
 import Sonar from './sonar.js';
+import Ally from './ally.js';
 
 class GameLoop {
     constructor() {
@@ -71,6 +72,7 @@ class GameLoop {
         this.bgFore = [];
 
         this.enemies = [];
+        this.allies = [];
         this.food = [];
         this.debris = [];
         this.particles = [];
@@ -478,6 +480,22 @@ class GameLoop {
         }
     }
 
+    spawnAlly(data, x, y) {
+        // Remove existing ally (Single Ally policy)
+        this.allies = [];
+
+        // Add random offset to prevent physics NaN (dist=0) if spawned exactly on player
+        const offsetX = (Math.random() - 0.5) * 50;
+        const offsetY = (Math.random() - 0.5) * 50;
+
+        const ally = new Ally(data, x + offsetX, y + offsetY, this.physics);
+        this.allies.push(ally);
+
+        // Visual Effect
+        this.spawnParticles(x, y, '#00ffff', 20, 300);
+        if(this.settings.audioEnabled) this.audio.playTone(600, 'sine', 1.0);
+    }
+
     spawnRival(code) {
         const data = Social.importCreature(code);
         if (!data) { alert("Invalid DNA"); return; }
@@ -679,6 +697,49 @@ class GameLoop {
         this.updateBackgroundOnly(dt);
         this.spawnEnemies();
         this.boidManager.update(dt, this.enemies);
+
+        // Update Allies
+        for (let i = this.allies.length - 1; i >= 0; i--) {
+             const ally = this.allies[i];
+             ally.update(dt, this.enemies, head); // Pass enemies and player head
+
+             // Player vs Ally Collision (Soft Body)
+             Physics.checkSoftBodyCollision(this.creature.points, ally.points);
+
+             // Ally vs Enemies Combat
+             for (let e of this.enemies) {
+                 const res = this.resolveCombat(ally, e);
+                 if (res.hit) {
+                     if (res.playerHit) { // Ally Hit
+                         const dmg = Math.max(0, e.stats.damage - ally.stats.defense);
+                         ally.gameStats.health -= dmg;
+                         // Knockback
+                         const angle = Math.atan2(ally.points[0].y - e.points[0].y, ally.points[0].x - e.points[0].x);
+                         ally.points[0].vx += Math.cos(angle) * 500;
+                         ally.points[0].vy += Math.sin(angle) * 500;
+                     }
+                     if (res.enemyHit) { // Enemy Hit by Ally
+                         const dmg = Math.max(0, ally.stats.damage - e.stats.defense);
+                         e.health -= dmg;
+                         if(e.onHit) e.onHit();
+                         // Knockback
+                         const angle = Math.atan2(e.points[0].y - ally.points[0].y, e.points[0].x - ally.points[0].x);
+                         e.points[0].vx += Math.cos(angle) * 500;
+                         e.points[0].vy += Math.sin(angle) * 500;
+                     }
+                     // Particles
+                     const mx = (ally.points[0].x + e.points[0].x) / 2;
+                     const my = (ally.points[0].y + e.points[0].y) / 2;
+                     this.spawnParticles(mx, my, '#ff00ff', 3, 100);
+                 }
+             }
+
+             if (ally.gameStats.health <= 0) {
+                 this.spawnParticles(ally.points[0].x, ally.points[0].y, '#00ffff', 10, 300);
+                 this.allies.splice(i, 1);
+             }
+        }
+
         this.skillManager.update(dt);
         this.distortion.update(dt);
         this.sonar.update(dt);
@@ -981,6 +1042,11 @@ class GameLoop {
         this.ctx.globalAlpha = 1.0;
 
         this.enemies.forEach(e => e.render(this.ctx));
+
+        // Render Allies
+        this.allies.forEach(a => {
+            this.renderer.drawCreature(a, a.headAngle || 0);
+        });
 
         if (this.gameState === 'playing' || this.gameState === 'paused') {
             this.renderer.drawCreature(this.creature, this.headAngle);
