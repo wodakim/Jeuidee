@@ -16,6 +16,10 @@ import Lighting from './lighting.js';
 import BiomeManager from './biomes.js';
 import LegacyManager, { LEGACY_UPGRADES } from './legacy.js';
 import Social from './social.js';
+import SkillManager from './skills.js';
+import Distortion from './distortion.js';
+import Boss from './boss.js';
+import Sonar from './sonar.js';
 
 class GameLoop {
     constructor() {
@@ -55,6 +59,9 @@ class GameLoop {
         this.biomeManager = new BiomeManager(this);
         this.headAngle = 0;
         this.editor = new Editor(this);
+        this.skillManager = new SkillManager(this);
+        this.distortion = new Distortion(this.canvas, this.settings);
+        this.sonar = new Sonar(this);
 
         // Ecosystem
         this.bgAbyssal = [];
@@ -68,6 +75,7 @@ class GameLoop {
         this.debris = [];
         this.particles = [];
         this.hitstop = 0;
+        this.bossActive = false;
         this.gameState = 'menu'; // menu, playing, gameover, paused
 
         // UI Layers
@@ -475,6 +483,12 @@ class GameLoop {
         const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
         const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
 
+        // Boss Spawn Chance (Rare, Mass > 2000)
+        if (this.creature.gameStats.mass > 2000 && !this.bossActive && Math.random() < 0.0005) {
+             this.spawnBoss('Leviathan');
+             return;
+        }
+
         // Use Biome Manager for difficulty/types
         const currentBiome = this.biomeManager.getCurrentBiome(playerX, playerY);
 
@@ -496,6 +510,29 @@ class GameLoop {
         } else {
              this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
         }
+    }
+
+    spawnBoss(type) {
+        const head = this.creature.points[0];
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 1500;
+        const x = head.x + Math.cos(angle) * dist;
+        const y = head.y + Math.sin(angle) * dist;
+
+        const boss = new Boss(x, y, type, this.physics, this);
+        this.enemies.push(boss);
+        this.bossActive = true;
+
+        // Announce
+        this.distortion.addShockwave(head.x, head.y);
+        if(this.settings.audioEnabled) this.audio.playTone(50, 'sawtooth', 3.0);
+
+        // UI Warning
+        const warning = document.createElement('div');
+        warning.style = "position:absolute; top:20%; width:100%; text-align:center; color:red; font-size:2rem; font-family:Orbitron; animation:pulse 0.5s infinite;";
+        warning.innerText = `WARNING: ${type.toUpperCase()} DETECTED`;
+        document.body.appendChild(warning);
+        setTimeout(() => warning.remove(), 4000);
     }
 
     initBackground() {
@@ -610,6 +647,9 @@ class GameLoop {
         this.updateBackgroundOnly(dt);
         this.spawnEnemies();
         this.boidManager.update(dt, this.enemies);
+        this.skillManager.update(dt);
+        this.distortion.update(dt);
+        this.sonar.update(dt);
 
         const playerRadius = head.radius;
         for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -653,6 +693,7 @@ class GameLoop {
                      this.spawnParticles(mx, my, '#ffaa00', 10, 400);
                      this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
                      this.debris.push(new Debris(e.points, e.constraints, e.color, 4));
+                     this.distortion.addShockwave(mx, my);
                      if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
 
                      const drop = this.progression.checkDrop(null, e.difficulty);
@@ -664,7 +705,8 @@ class GameLoop {
             }
 
             const dist = Math.hypot(head.x - e.points[0].x, head.y - e.points[0].y);
-            if (dist > 3000) this.enemies.splice(i, 1);
+            if (dist > 3000 && e.bossType !== 'Leviathan') this.enemies.splice(i, 1);
+            if (e.bossType && e.health <= 0) this.bossActive = false;
         }
 
         for (let i = this.food.length - 1; i >= 0; i--) {
@@ -893,6 +935,8 @@ class GameLoop {
 
         // Apply Lighting Overlay (Multiply) & Vignette
         this.lighting.render(this.ctx);
+        this.distortion.render(this.ctx, this.camera);
+        this.sonar.render(this.ctx, this.camera);
 
         if (this.input.active && !this.editor.active && this.gameState === 'playing') {
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';

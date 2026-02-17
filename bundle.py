@@ -23,6 +23,10 @@ def bundle():
         'js/legacy.js',
         'js/social.js',
         'js/editor.js',
+        'js/skills.js',
+        'js/distortion.js',
+        'js/boss.js',
+        'js/sonar.js',
         'js/gameloop.js'
     ]
 
