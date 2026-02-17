@@ -390,20 +390,25 @@ class GameLoop {
         this.creature.gameStats = this.creature.gameStats || { dna: 0, mass: 10, health: 100, maxHealth: 100 };
         this.headAngle = 0;
 
-        const spineLength = 12;
+        const spineLength = 3; // Reduced from 12 for starter balance
         const startX = 0;
         const startY = 0;
 
+        // Head, Body, Tail sizes
+        const sizes = [25, 20, 15];
+
         for (let i = 0; i < spineLength; i++) {
-            const baseRad = 20 - i * 1.2;
-            const p = Physics.createPoint(startX, startY + i * 20, baseRad, 1);
+            const baseRad = sizes[i];
+            const p = Physics.createPoint(startX, startY + i * 30, baseRad, 1);
             p.baseRadius = baseRad;
+            p.initialBaseRadius = baseRad;
+            p.scaleFactor = 1.0;
             this.creature.points.push(p);
 
             if (i > 0) {
                 const prev = this.creature.points[i - 1];
-                const link = Physics.createConstraint(prev, p, 0.3, 15);
-                link.baseLength = 15;
+                const link = Physics.createConstraint(prev, p, 0.5, 25);
+                link.baseLength = 25;
                 this.creature.constraints.push(link);
             }
         }
