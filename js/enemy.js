@@ -7,6 +7,10 @@ export default class Enemy {
         this.difficulty = difficulty; // 1 to 10+
         this.type = type; // 'hunter', 'grazer', 'titan'
 
+        // AI & Tier Props
+        this.tier = 1; // Default
+        this.mass = 10; // Default approximation
+
         // Procedural Generation
         this.scale = 1 + (difficulty * 0.2); // Growth
         this.color = type === 'grazer' ? `hsl(${100 + Math.random() * 50}, 70%, 50%)` : `hsl(${Math.random() * 360}, 70%, 50%)`;
@@ -27,6 +31,9 @@ export default class Enemy {
         this.stats.damage = 5 + difficulty * 2;
         this.health = (20 + difficulty * 10) * (type === 'titan' ? 5 : 1);
         this.maxHealth = this.health;
+
+        // Mass approximation for AI logic
+        this.mass = 10 * this.scale * this.scale;
 
         // AI State
         this.state = 'wander';
@@ -92,9 +99,9 @@ export default class Enemy {
         }
     }
 
-    update(dt, playerHead) {
+    update(dt, playerHead, playerMass = 10) {
         this.stateTimer -= dt;
-        if (this.stateTimer <= 0) this.pickState(playerHead);
+        if (this.stateTimer <= 0) this.pickState(playerHead, playerMass);
 
         let head = this.points[0];
         let dx = 0, dy = 0;
@@ -109,7 +116,7 @@ export default class Enemy {
             // Wander
             dx = this.targetX - head.x;
             dy = this.targetY - head.y;
-            if (Math.hypot(dx, dy) < 50) this.pickState(playerHead);
+            if (Math.hypot(dx, dy) < 50) this.pickState(playerHead, playerMass);
         }
 
         const dist = Math.hypot(dx, dy);
@@ -124,12 +131,12 @@ export default class Enemy {
         this.physics.update(this.points, this.constraints, dt);
     }
 
-    pickState(playerHead) {
+    pickState(playerHead, playerMass) {
         this.stateTimer = 1.0 + Math.random();
 
         const head = this.points[0];
         const dist = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
-        const aggroRange = 600 * this.scale;
+        const aggroRange = 800 * this.scale;
 
         // Decision Logic
         // 1. Health Critical? -> Flee
@@ -146,15 +153,19 @@ export default class Enemy {
             } else if (this.type === 'titan') {
                 this.state = 'chase';
             } else {
-                // Hunter: Compare size/strength
-                // Simplistic: if player > 1.5x me, flee
-                // Need player radius reference? playerHead has radius property usually?
-                // Let's assume passed playerHead is just coordinate.
-                // We'll trust difficulty/scale for now.
-                // If I am small (diff < 5) and player is huge?
-                // Random chance to be brave or coward
-                if (Math.random() > 0.3) this.state = 'chase';
-                else this.state = 'flee';
+                // Hunter: Compare Mass
+                // If player is significantly larger (1.5x), Flee
+                // If player is smaller (0.8x), Hunt
+
+                if (playerMass > this.mass * 1.5) {
+                    this.state = 'flee';
+                } else if (playerMass < this.mass * 0.8) {
+                    this.state = 'chase';
+                } else {
+                    // Equal match: Random bravery
+                    if (Math.random() > 0.5) this.state = 'chase';
+                    else this.state = 'wander'; // Ignore
+                }
             }
         } else {
             this.state = 'wander';
@@ -167,7 +178,7 @@ export default class Enemy {
     // Called when damaged
     onHit(sourceX, sourceY) {
         // Counter attack logic
-        this.health -= 10; // Placeholder damage if not handled in gameloop
+        this.health -= 10;
         if (this.health > 0 && this.type !== 'grazer') {
             this.state = 'chase'; // Aggro
             this.stateTimer = 5.0; // Focus on player
