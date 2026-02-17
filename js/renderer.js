@@ -1,3 +1,5 @@
+import IKSystem from './ik.js';
+
 export default class Renderer {
     constructor(ctx, camera, settings) {
         this.ctx = ctx;
@@ -60,7 +62,12 @@ export default class Renderer {
                     if (part.boneIndex === 0) spineAngle += Math.PI;
                 }
 
-                this.drawPart(part.type, bone.x, bone.y, spineAngle, part.side, bone.radius, color);
+                // Initialize IK for Tentacles if missing
+                if (part.type === 'Tentacle' && !part.ik) {
+                    part.ik = IKSystem.createTentacle(8, 10);
+                }
+
+                this.drawPart(part, bone.x, bone.y, spineAngle, bone.radius, color);
             });
         }
 
@@ -89,14 +96,59 @@ export default class Renderer {
         this.ctx.restore();
     }
 
-    drawPart(type, x, y, spineAngle, side, radius, bodyColor) {
+    drawPart(part, x, y, spineAngle, radius, bodyColor) {
+        const type = part.type;
+        const side = part.side;
+
+        // Special handling for Tentacles (World Space Drawing via IK)
+        if (type === 'Tentacle' && part.ik) {
+            // Calculate Attachment Point
+            let sideAngle = 0;
+            if (side === 1) sideAngle = Math.PI/2;
+            else if (side === -1) sideAngle = -Math.PI/2;
+
+            const attachAngle = spineAngle + sideAngle;
+            const rootX = x + Math.cos(attachAngle) * radius;
+            const rootY = y + Math.sin(attachAngle) * radius;
+
+            // Update IK
+            IKSystem.update(part.ik, rootX, rootY, attachAngle, 0.016);
+
+            // Draw
+            this.ctx.save(); // Just in case, though IK draws world space
+            this.ctx.strokeStyle = '#a0f';
+            this.ctx.lineWidth = Math.max(2, radius * 0.3);
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#a0f';
+                this.ctx.shadowBlur = 10;
+            }
+
+            this.ctx.beginPath();
+            const segs = part.ik.segments;
+            this.ctx.moveTo(segs[0].x, segs[0].y);
+            for(let i=1; i<segs.length; i++) {
+                this.ctx.lineTo(segs[i].x, segs[i].y);
+            }
+            this.ctx.stroke();
+            this.ctx.shadowBlur = 0;
+
+            // Bulb
+            const tip = segs[segs.length-1];
+            this.ctx.fillStyle = '#d0f';
+            this.ctx.beginPath();
+            this.ctx.arc(tip.x, tip.y, radius * 0.2, 0, Math.PI*2);
+            this.ctx.fill();
+            this.ctx.restore();
+            return;
+        }
+
+        // Standard Parts (Relative Drawing)
         this.ctx.save();
         this.ctx.translate(x, y);
 
         let sideAngle = 0;
         if (side === 1) sideAngle = Math.PI/2;
         else if (side === -1) sideAngle = -Math.PI/2;
-        // side 0 = 0 (Forward)
 
         this.ctx.rotate(spineAngle + sideAngle);
 
@@ -132,21 +184,13 @@ export default class Renderer {
         } else if (type === 'Jaws') {
             this.ctx.fillStyle = '#eee';
             this.ctx.beginPath();
-            // Upper Jaw
-            this.ctx.moveTo(0, -10);
-            this.ctx.lineTo(25, -5);
-            this.ctx.lineTo(0, 0);
-            // Lower Jaw
-            this.ctx.moveTo(0, 10);
-            this.ctx.lineTo(25, 5);
-            this.ctx.lineTo(0, 0);
+            this.ctx.moveTo(0, -10); this.ctx.lineTo(25, -5); this.ctx.lineTo(0, 0);
+            this.ctx.moveTo(0, 10); this.ctx.lineTo(25, 5); this.ctx.lineTo(0, 0);
             this.ctx.fill();
-
-            // Teeth
             this.ctx.fillStyle = '#fff';
             this.ctx.beginPath();
-            this.ctx.moveTo(10, -5); ctx.lineTo(15, -2); ctx.lineTo(20, -5);
-            this.ctx.moveTo(10, 5); ctx.lineTo(15, 2); ctx.lineTo(20, 5);
+            this.ctx.moveTo(10, -5); this.ctx.lineTo(15, -2); this.ctx.lineTo(20, -5);
+            this.ctx.moveTo(10, 5); this.ctx.lineTo(15, 2); this.ctx.lineTo(20, 5);
             this.ctx.fill();
         } else if (type === 'Eye') {
             this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
@@ -156,42 +200,8 @@ export default class Renderer {
             this.ctx.fill();
             this.ctx.fillStyle = 'black';
             this.ctx.beginPath();
-            this.ctx.arc(14, 0, 2, 0, Math.PI*2); // Pupil
+            this.ctx.arc(14, 0, 2, 0, Math.PI*2);
             this.ctx.fill();
-        } else if (type === 'Tentacle') {
-            this.ctx.strokeStyle = '#a0f';
-            this.ctx.lineWidth = 4;
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = '#a0f';
-                this.ctx.shadowBlur = 10;
-            }
-
-            // AAA Proc-Gen Tentacle (Sine Wave Chain)
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, 0);
-
-            const t = Date.now() * 0.005;
-            // Simulate 4 segments trailing
-            let px = 0, py = 0;
-            for(let i=1; i<=5; i++) {
-                // Wave function based on time and segment index
-                // Adds a "whipping" motion
-                const wave = Math.sin(t + i * 0.5) * (i * 3);
-                const nx = i * 10;
-                const ny = wave;
-
-                this.ctx.lineTo(nx, ny);
-                px = nx; py = ny;
-            }
-            this.ctx.stroke();
-
-            // Bulb at end
-            this.ctx.fillStyle = '#d0f';
-            this.ctx.beginPath();
-            this.ctx.arc(px, py, 3, 0, Math.PI*2);
-            this.ctx.fill();
-
-            this.ctx.shadowBlur = 0;
         } else if (type === 'Shield') {
             this.ctx.fillStyle = '#444';
             this.ctx.strokeStyle = '#888';
@@ -209,7 +219,6 @@ export default class Renderer {
             this.ctx.lineTo(15, 8);
             this.ctx.lineTo(0, 5);
             this.ctx.fill();
-            // Flame
             if (Math.random() > 0.5) {
                 this.ctx.fillStyle = '#fa0';
                 this.ctx.beginPath();
@@ -228,7 +237,6 @@ export default class Renderer {
             this.ctx.arc(10, 0, 8, 0, Math.PI*2);
             this.ctx.fill();
             this.ctx.shadowBlur = 0;
-            // Bubbles
             this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
             this.ctx.beginPath();
             this.ctx.arc(12 - Math.random()*4, -2 + Math.random()*4, 2, 0, Math.PI*2);

@@ -12,7 +12,7 @@ export default class Stats {
         this.turnSpeed = this.baseTurnSpeed;
     }
 
-    calculate(parts) {
+    calculate(parts, legacyBuffs = null) {
         let speedMod = 0;
         let damageMod = 0;
         let defenseMod = 0;
@@ -54,5 +54,11 @@ export default class Stats {
         this.damage = this.baseDamage + damageMod;
         this.defense = this.baseDefense + defenseMod;
         this.turnSpeed = Math.max(1, this.baseTurnSpeed + turnMod);
+
+        // Apply Legacy Buffs
+        if (legacyBuffs) {
+            this.speed *= legacyBuffs.speedMult;
+            // Add other stats if needed
+        }
     }
 }

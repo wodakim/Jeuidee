@@ -12,6 +12,10 @@ import Progression, { PARTS_DB } from './progression.js';
 import AssetGenerator from './assets.js';
 import BoidManager from './boids.js';
 import Debris from './debris.js';
+import Lighting from './lighting.js';
+import BiomeManager from './biomes.js';
+import LegacyManager, { LEGACY_UPGRADES } from './legacy.js';
+import Social from './social.js';
 
 class GameLoop {
     constructor() {
@@ -30,6 +34,7 @@ class GameLoop {
         this.camera = new Camera(window.innerWidth, window.innerHeight);
         this.settings = new Settings();
         this.audio = new AudioSystem();
+        this.lighting = new Lighting(this.canvas, this.settings);
         this.renderer = new Renderer(this.ctx, this.camera, this.settings);
 
         // --- JELLY CREATURE (Soft Body) ---
@@ -44,8 +49,10 @@ class GameLoop {
 
         this.saveManager = new SaveManager(this);
         this.progression = new Progression(this.saveManager);
+        this.legacyManager = new LegacyManager();
         this.assets = new AssetGenerator();
         this.boidManager = new BoidManager(this.physics);
+        this.biomeManager = new BiomeManager(this);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
@@ -83,11 +90,18 @@ class GameLoop {
             <h1>NEON ABYSS</h1>
             <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
                 <button id="play-btn" class="btn-neon">EVOLVE</button>
+                <button id="legacy-btn" class="btn-neon" style="border-color:#f0f; color:#f0f;">ANCESTRAL MEMORY</button>
                 <button id="settings-btn" class="btn-neon" style="font-size:1rem; border-color:#888; color:#888;">SETTINGS</button>
             </div>
             <p style="margin-top:20px; font-size:0.8em; opacity:0.7;">Touch & Drag to Move</p>
         `;
         document.body.appendChild(menu);
+
+        // Legacy Menu
+        const legacyMenu = document.createElement('div');
+        legacyMenu.id = 'legacy-menu';
+        legacyMenu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:200; flex-direction:column; align-items:center; padding:20px; box-sizing:border-box; overflow-y:auto;';
+        document.body.appendChild(legacyMenu);
 
         // Settings Menu
         const settingsMenu = document.createElement('div');
@@ -98,6 +112,8 @@ class GameLoop {
             <div style="display:flex; flex-direction:column; gap:15px;">
                 <button id="toggle-fx-btn" class="btn-neon">FX: ON</button>
                 <button id="toggle-audio-btn" class="btn-neon">AUDIO: ON</button>
+                <button id="export-btn" class="btn-neon" style="border-color:#ff0; color:#ff0;">EXPORT DNA</button>
+                <button id="import-btn" class="btn-neon" style="border-color:#ff0; color:#ff0;">IMPORT RIVAL</button>
                 <button id="reset-save-btn" class="btn-neon btn-danger">RESET SAVE</button>
                 <button id="back-btn" class="btn-neon" style="margin-top:20px;">BACK</button>
             </div>
@@ -157,6 +173,7 @@ class GameLoop {
             document.getElementById('settings-menu').style.display = 'flex';
             this.updateSettingsButtons();
         };
+        document.getElementById('legacy-btn').onclick = () => this.openLegacyMenu();
         document.getElementById('back-btn').onclick = () => {
             document.getElementById('settings-menu').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
@@ -169,6 +186,14 @@ class GameLoop {
         };
         document.getElementById('toggle-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('toggle-audio-btn').onclick = () => this.toggleAudio();
+        document.getElementById('export-btn').onclick = () => {
+            const code = Social.exportCreature(this.creature);
+            Social.copyToClipboard(code);
+        };
+        document.getElementById('import-btn').onclick = () => {
+            const code = prompt("Paste Rival DNA:");
+            if(code) this.spawnRival(code);
+        };
         document.getElementById('pause-trigger-btn').onclick = () => this.pauseGame();
         document.getElementById('respawn-btn').onclick = () => this.respawn();
         document.getElementById('evolve-btn').onclick = () => {
@@ -237,6 +262,65 @@ class GameLoop {
         document.getElementById('pause-audio-btn').innerText = audioText;
     }
 
+    openLegacyMenu() {
+        const menu = document.getElementById('legacy-menu');
+        menu.style.display = 'flex';
+        document.getElementById('main-menu').style.display = 'none';
+        this.renderLegacyUI();
+    }
+
+    renderLegacyUI() {
+        const menu = document.getElementById('legacy-menu');
+        const dna = this.legacyManager.legacyDNA;
+
+        let html = `
+            <h1 style="color:#f0f; font-family:Orbitron;">ANCESTRAL MEMORY</h1>
+            <h3 style="color:#fff;">LEGACY DNA: ${dna}</h3>
+            <div class="upgrade-grid" style="display:flex; flex-wrap:wrap; gap:20px; justify-content:center; width:100%; max-width:600px;">
+        `;
+
+        for (const [key, up] of Object.entries(LEGACY_UPGRADES)) {
+            const level = this.legacyManager.upgrades[key] || 0;
+            const cost = up.cost * (level + 1);
+            const isMax = level >= up.max;
+            const canAfford = dna >= cost && !isMax;
+
+            html += `
+                <div class="upgrade-card" style="border:1px solid #f0f; padding:15px; width:250px; background:rgba(20,0,20,0.8); text-align:left;">
+                    <h3 style="color:#f0f; margin:0;">${up.name}</h3>
+                    <p style="color:#aaa; font-size:0.8rem;">${up.desc}</p>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                        <span style="color:#fff;">Lvl ${level}/${up.max}</span>
+                        <button onclick="game.buyLegacy('${key}')"
+                            style="padding:5px 10px; background:${canAfford ? '#f0f' : '#444'}; border:none; color:#fff; cursor:${canAfford ? 'pointer' : 'default'};">
+                            ${isMax ? 'MAX' : cost + ' DNA'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `</div>
+            <button id="legacy-back-btn" class="btn-neon" style="margin-top:30px;">BACK</button>
+        `;
+
+        menu.innerHTML = html;
+
+        document.getElementById('legacy-back-btn').onclick = () => {
+            menu.style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+        };
+    }
+
+    buyLegacy(key) {
+        if (this.legacyManager.buyUpgrade(key)) {
+            if(navigator.vibrate) navigator.vibrate([50, 50]);
+            this.renderLegacyUI(); // Refresh
+        } else {
+            if(navigator.vibrate) navigator.vibrate(200); // Error
+        }
+    }
+
     pauseGame(isUnlock = false) {
         if (this.gameState === 'playing') {
             this.gameState = 'paused';
@@ -299,18 +383,30 @@ class GameLoop {
                 this.creature.constraints.push(link);
             }
         }
-        this.creature.stats.calculate(this.creature.parts);
+        this.creature.stats.calculate(this.creature.parts, this.legacyManager.getBuffs());
     }
 
     respawn() {
+        // Convert Mass to Legacy DNA before reset
+        const earned = this.legacyManager.convertMassToLegacy(this.creature.gameStats.mass);
+        alert(`Extinction Event.\nAncestral DNA Gained: ${earned}`);
+
         document.getElementById('game-over').style.display = 'none';
         this.creature.gameStats.health = this.creature.gameStats.maxHealth;
-        this.creature.gameStats.mass = 10; // Reset to base size (Rebirth)
+
+        // Apply Start Size Legacy
+        const buffs = this.legacyManager.getBuffs();
+        this.creature.gameStats.mass = 10 + buffs.startMass;
+
         this.saveManager.save();
         this.resetCreature();
         this.camera.x = 0;
         this.camera.y = 0;
-        this.gameState = 'playing';
+        this.gameState = 'menu'; // Go to menu to spend points? Or playing?
+        // User flow: Death -> Rebirth Button -> Playing.
+        // Let's go to menu to allow upgrades.
+        document.getElementById('main-menu').style.display = 'flex';
+        document.getElementById('game-hud').style.display = 'none';
     }
 
     resize() {
@@ -321,6 +417,7 @@ class GameLoop {
         this.canvas.width = this.width;
         this.canvas.height = this.height;
         this.camera.resize(this.width, this.height);
+        if (this.lighting) this.lighting.resize(this.width, this.height);
     }
 
     spawnFood(count) {
@@ -347,35 +444,57 @@ class GameLoop {
         }
     }
 
+    spawnRival(code) {
+        const data = Social.importCreature(code);
+        if (!data) { alert("Invalid DNA"); return; }
+
+        // Spawn Rival as a powerful Titan-like enemy
+        const head = this.creature.points[0];
+        const dist = 1000;
+        const angle = Math.random() * Math.PI * 2;
+        const x = head.x + Math.cos(angle) * dist;
+        const y = head.y + Math.sin(angle) * dist;
+
+        const rival = new Enemy(x, y, 10, this.physics, 'titan');
+        rival.parts = data.parts; // Override parts
+        rival.color = data.color;
+        // Recalculate rival stats based on imported parts
+        rival.stats.calculate(rival.parts);
+        rival.health = 500; rival.maxHealth = 500; // Boss health
+        rival.active = true;
+
+        this.enemies.push(rival);
+        alert("RIVAL DETECTED: A new apex predator has entered the ecosystem.");
+    }
+
     spawnEnemies() {
-        const targetCount = 12 + Math.floor(this.creature.gameStats.mass / 50); // Scale population
+        const targetCount = 12 + Math.floor(this.creature.gameStats.mass / 50);
         if (this.enemies.length >= targetCount) return;
 
         const playerScale = Math.sqrt(this.creature.gameStats.mass / 10);
-        const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
-
-        // Spawn distance scales with player to prevent popping
-        const spawnDist = 1000 * Math.max(1, playerScale * 0.5) + 500;
-
         const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
         const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
 
+        // Use Biome Manager for difficulty/types
+        const currentBiome = this.biomeManager.getCurrentBiome(playerX, playerY);
+
+        const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
+        const spawnDist = 1000 * Math.max(1, playerScale * 0.5) + 500;
         const angle = Math.random() * Math.PI * 2;
         const ex = playerX + Math.cos(angle) * spawnDist;
         const ey = playerY + Math.sin(angle) * spawnDist;
 
-        // Biome Logic
-        if (difficulty > 8 && Math.random() < 0.1) {
-            // Abyss: Titan
-            this.enemies.push(new Enemy(ex, ey, difficulty * 1.5, this.physics, 'titan'));
-        } else if (Math.random() < 0.4) {
-            // Grazers (Flock)
-            const flockSize = 3 + Math.floor(Math.random() * 4);
-            const flock = this.boidManager.createFlock(ex, ey, flockSize, difficulty, 'grazer');
-            this.enemies.push(...flock);
+        // Pick type based on Biome
+        const type = currentBiome.enemyTypes[Math.floor(Math.random() * currentBiome.enemyTypes.length)];
+
+        if (type === 'titan') {
+             this.enemies.push(new Enemy(ex, ey, difficulty * 1.5, this.physics, 'titan'));
+        } else if (type === 'grazer') {
+             const flockSize = 3 + Math.floor(Math.random() * 4);
+             const flock = this.boidManager.createFlock(ex, ey, flockSize, difficulty, 'grazer');
+             this.enemies.push(...flock);
         } else {
-            // Hunters
-            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
+             this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
         }
     }
 
@@ -575,6 +694,9 @@ class GameLoop {
 
         this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
 
+        // Update Biome Effects
+        this.biomeManager.update(dt, this.creature);
+
         for (let i = this.debris.length - 1; i >= 0; i--) {
             const d = this.debris[i];
             d.update(dt, this.physics);
@@ -665,21 +787,25 @@ class GameLoop {
     }
 
     render() {
-        // Dynamic Background based on Mass (Depth)
-        const depth = Math.min(1, this.creature.gameStats.mass / 500);
+        // Update Lighting (Offscreen)
+        if (this.settings.fxEnabled && this.gameState === 'playing') {
+            this.lighting.update(this.camera, {
+                player: this.creature,
+                enemies: this.enemies,
+                food: this.food
+            });
+        }
 
-        // Interpolate Color: Dark Blue -> Abyss Black
-        // Top: #000510 -> #000000
-        // Bottom: #001020 -> #100010 (Purple tint)
+        // Dynamic Background based on Biome
+        const head = this.creature.points[0];
+        const biome = this.biomeManager.getCurrentBiome(head ? head.x : 0, head ? head.y : 0);
 
-        const r1 = 0, g1 = Math.floor(5 * (1-depth)), b1 = Math.floor(16 * (1-depth));
-        const r2 = Math.floor(16 * depth), g2 = 0, b2 = Math.floor(32 * (1-depth*0.5));
-
-        const col1 = `rgb(${r1},${g1},${b1})`;
-        const col2 = `rgb(${r2},${g2},${b2})`;
+        // Interpolate towards biome color? (Simple for now: Just use biome color)
+        // Ideally we lerp, but for "Infinite Map" distinct zones are okay.
 
         const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
-        bgGrad.addColorStop(0, col1); bgGrad.addColorStop(1, col2);
+        bgGrad.addColorStop(0, '#000000');
+        bgGrad.addColorStop(1, biome.color);
         this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
 
         // --- LAYER 0: GOD RAYS (Parallax 0.0) ---
@@ -764,6 +890,9 @@ class GameLoop {
         this.bgFore.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
         this.ctx.restore();
         this.ctx.globalAlpha = 1.0;
+
+        // Apply Lighting Overlay (Multiply) & Vignette
+        this.lighting.render(this.ctx);
 
         if (this.input.active && !this.editor.active && this.gameState === 'playing') {
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';

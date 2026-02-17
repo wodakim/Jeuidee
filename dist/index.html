@@ -489,7 +489,7 @@ class Stats {
         this.turnSpeed = this.baseTurnSpeed;
     }
 
-    calculate(parts) {
+    calculate(parts, legacyBuffs = null) {
         let speedMod = 0;
         let damageMod = 0;
         let defenseMod = 0;
@@ -531,6 +531,12 @@ class Stats {
         this.damage = this.baseDamage + damageMod;
         this.defense = this.baseDefense + defenseMod;
         this.turnSpeed = Math.max(1, this.baseTurnSpeed + turnMod);
+
+        // Apply Legacy Buffs
+        if (legacyBuffs) {
+            this.speed *= legacyBuffs.speedMult;
+            // Add other stats if needed
+        }
     }
 }
 
@@ -740,6 +746,8 @@ class AssetGenerator {
 
 
 // --- js/renderer.js ---
+
+
 class Renderer {
     constructor(ctx, camera, settings) {
         this.ctx = ctx;
@@ -802,7 +810,12 @@ class Renderer {
                     if (part.boneIndex === 0) spineAngle += Math.PI;
                 }
 
-                this.drawPart(part.type, bone.x, bone.y, spineAngle, part.side, bone.radius, color);
+                // Initialize IK for Tentacles if missing
+                if (part.type === 'Tentacle' && !part.ik) {
+                    part.ik = IKSystem.createTentacle(8, 10);
+                }
+
+                this.drawPart(part, bone.x, bone.y, spineAngle, bone.radius, color);
             });
         }
 
@@ -831,14 +844,59 @@ class Renderer {
         this.ctx.restore();
     }
 
-    drawPart(type, x, y, spineAngle, side, radius, bodyColor) {
+    drawPart(part, x, y, spineAngle, radius, bodyColor) {
+        const type = part.type;
+        const side = part.side;
+
+        // Special handling for Tentacles (World Space Drawing via IK)
+        if (type === 'Tentacle' && part.ik) {
+            // Calculate Attachment Point
+            let sideAngle = 0;
+            if (side === 1) sideAngle = Math.PI/2;
+            else if (side === -1) sideAngle = -Math.PI/2;
+
+            const attachAngle = spineAngle + sideAngle;
+            const rootX = x + Math.cos(attachAngle) * radius;
+            const rootY = y + Math.sin(attachAngle) * radius;
+
+            // Update IK
+            IKSystem.update(part.ik, rootX, rootY, attachAngle, 0.016);
+
+            // Draw
+            this.ctx.save(); // Just in case, though IK draws world space
+            this.ctx.strokeStyle = '#a0f';
+            this.ctx.lineWidth = Math.max(2, radius * 0.3);
+            if (this.settings.fxEnabled) {
+                this.ctx.shadowColor = '#a0f';
+                this.ctx.shadowBlur = 10;
+            }
+
+            this.ctx.beginPath();
+            const segs = part.ik.segments;
+            this.ctx.moveTo(segs[0].x, segs[0].y);
+            for(let i=1; i<segs.length; i++) {
+                this.ctx.lineTo(segs[i].x, segs[i].y);
+            }
+            this.ctx.stroke();
+            this.ctx.shadowBlur = 0;
+
+            // Bulb
+            const tip = segs[segs.length-1];
+            this.ctx.fillStyle = '#d0f';
+            this.ctx.beginPath();
+            this.ctx.arc(tip.x, tip.y, radius * 0.2, 0, Math.PI*2);
+            this.ctx.fill();
+            this.ctx.restore();
+            return;
+        }
+
+        // Standard Parts (Relative Drawing)
         this.ctx.save();
         this.ctx.translate(x, y);
 
         let sideAngle = 0;
         if (side === 1) sideAngle = Math.PI/2;
         else if (side === -1) sideAngle = -Math.PI/2;
-        // side 0 = 0 (Forward)
 
         this.ctx.rotate(spineAngle + sideAngle);
 
@@ -874,21 +932,13 @@ class Renderer {
         } else if (type === 'Jaws') {
             this.ctx.fillStyle = '#eee';
             this.ctx.beginPath();
-            // Upper Jaw
-            this.ctx.moveTo(0, -10);
-            this.ctx.lineTo(25, -5);
-            this.ctx.lineTo(0, 0);
-            // Lower Jaw
-            this.ctx.moveTo(0, 10);
-            this.ctx.lineTo(25, 5);
-            this.ctx.lineTo(0, 0);
+            this.ctx.moveTo(0, -10); this.ctx.lineTo(25, -5); this.ctx.lineTo(0, 0);
+            this.ctx.moveTo(0, 10); this.ctx.lineTo(25, 5); this.ctx.lineTo(0, 0);
             this.ctx.fill();
-
-            // Teeth
             this.ctx.fillStyle = '#fff';
             this.ctx.beginPath();
-            this.ctx.moveTo(10, -5); ctx.lineTo(15, -2); ctx.lineTo(20, -5);
-            this.ctx.moveTo(10, 5); ctx.lineTo(15, 2); ctx.lineTo(20, 5);
+            this.ctx.moveTo(10, -5); this.ctx.lineTo(15, -2); this.ctx.lineTo(20, -5);
+            this.ctx.moveTo(10, 5); this.ctx.lineTo(15, 2); this.ctx.lineTo(20, 5);
             this.ctx.fill();
         } else if (type === 'Eye') {
             this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
@@ -898,42 +948,8 @@ class Renderer {
             this.ctx.fill();
             this.ctx.fillStyle = 'black';
             this.ctx.beginPath();
-            this.ctx.arc(14, 0, 2, 0, Math.PI*2); // Pupil
+            this.ctx.arc(14, 0, 2, 0, Math.PI*2);
             this.ctx.fill();
-        } else if (type === 'Tentacle') {
-            this.ctx.strokeStyle = '#a0f';
-            this.ctx.lineWidth = 4;
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = '#a0f';
-                this.ctx.shadowBlur = 10;
-            }
-
-            // AAA Proc-Gen Tentacle (Sine Wave Chain)
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, 0);
-
-            const t = Date.now() * 0.005;
-            // Simulate 4 segments trailing
-            let px = 0, py = 0;
-            for(let i=1; i<=5; i++) {
-                // Wave function based on time and segment index
-                // Adds a "whipping" motion
-                const wave = Math.sin(t + i * 0.5) * (i * 3);
-                const nx = i * 10;
-                const ny = wave;
-
-                this.ctx.lineTo(nx, ny);
-                px = nx; py = ny;
-            }
-            this.ctx.stroke();
-
-            // Bulb at end
-            this.ctx.fillStyle = '#d0f';
-            this.ctx.beginPath();
-            this.ctx.arc(px, py, 3, 0, Math.PI*2);
-            this.ctx.fill();
-
-            this.ctx.shadowBlur = 0;
         } else if (type === 'Shield') {
             this.ctx.fillStyle = '#444';
             this.ctx.strokeStyle = '#888';
@@ -951,7 +967,6 @@ class Renderer {
             this.ctx.lineTo(15, 8);
             this.ctx.lineTo(0, 5);
             this.ctx.fill();
-            // Flame
             if (Math.random() > 0.5) {
                 this.ctx.fillStyle = '#fa0';
                 this.ctx.beginPath();
@@ -970,7 +985,6 @@ class Renderer {
             this.ctx.arc(10, 0, 8, 0, Math.PI*2);
             this.ctx.fill();
             this.ctx.shadowBlur = 0;
-            // Bubbles
             this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
             this.ctx.beginPath();
             this.ctx.arc(12 - Math.random()*4, -2 + Math.random()*4, 2, 0, Math.PI*2);
@@ -1622,6 +1636,404 @@ class Debris {
 }
 
 
+// --- js/ik.js ---
+// Procedural Animation System (Inverse Kinematics)
+
+class IKSystem {
+    // Verlet Integration for smooth, organic tentacle movement
+    // No strict FABRIK, but a physics-based chain simulation perfect for "Jelly" feel.
+
+    constructor() {}
+
+    static createTentacle(length = 8, segmentLength = 10) {
+        let segments = [];
+        for (let i = 0; i < length; i++) {
+            // Initialize points with velocity storage (oldX/oldY)
+            segments.push({ x: 0, y: 0, oldX: 0, oldY: 0 });
+        }
+        return { segments, segmentLength };
+    }
+
+    static update(tentacle, rootX, rootY, angleOffset, dt) {
+        const segments = tentacle.segments;
+        if (!segments || segments.length === 0) return;
+
+        // 1. Move Root to Bone Position
+        const root = segments[0];
+        root.x = rootX;
+        root.y = rootY;
+
+        // If this is the first frame (or reset), init all segments to root to avoid explosion
+        if (segments[1].x === 0 && segments[1].y === 0) {
+             for(let i=1; i<segments.length; i++) {
+                 segments[i].x = rootX; segments[i].y = rootY;
+                 segments[i].oldX = rootX; segments[i].oldY = rootY;
+             }
+        }
+
+        // 2. Physics Simulation (Verlet Integration)
+        const drag = 0.9;
+        const time = Date.now() * 0.003;
+
+        for (let i = 1; i < segments.length; i++) {
+            const p = segments[i];
+
+            // Calculate Velocity
+            const vx = (p.x - p.oldX) * drag;
+            const vy = (p.y - p.oldY) * drag;
+
+            // Store current as old for next frame
+            p.oldX = p.x;
+            p.oldY = p.y;
+
+            // Apply Velocity
+            p.x += vx;
+            p.y += vy;
+
+            // Add Procedural Wave Motion (Sine Wave perpendicular to tentacle direction)
+            const wave = Math.sin(time + i * 0.5) * (i * 0.5);
+
+            const pX = Math.cos(angleOffset + Math.PI/2);
+            const pY = Math.sin(angleOffset + Math.PI/2);
+
+            p.x += pX * wave * dt * 60;
+            p.y += pY * wave * dt * 60;
+        }
+
+        // 3. Constrain Lengths (Relaxation Solver)
+        const iterations = 5;
+        const segLen = tentacle.segmentLength;
+
+        for (let k = 0; k < iterations; k++) {
+            segments[0].x = rootX;
+            segments[0].y = rootY;
+
+            for (let i = 0; i < segments.length - 1; i++) {
+                const a = segments[i];
+                const b = segments[i+1];
+
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+
+                if (dist === 0) continue;
+
+                const diff = (dist - segLen) / dist;
+
+                const ox = dx * diff * 0.5;
+                const oy = dy * diff * 0.5;
+
+                if (i !== 0) {
+                     a.x += ox;
+                     a.y += oy;
+                }
+                b.x -= ox;
+                b.y -= oy;
+            }
+        }
+    }
+}
+
+
+// --- js/lighting.js ---
+class Lighting {
+    constructor(canvas, settings) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.settings = settings;
+
+        // Offscreen canvas for lighting map
+        this.lightCanvas = document.createElement('canvas');
+        this.lightCtx = this.lightCanvas.getContext('2d');
+        this.resize(canvas.width, canvas.height);
+    }
+
+    resize(w, h) {
+        this.lightCanvas.width = w;
+        this.lightCanvas.height = h;
+    }
+
+    update(camera, entities) {
+        if (!this.settings.fxEnabled) return;
+
+        const w = this.lightCanvas.width;
+        const h = this.lightCanvas.height;
+
+        // 1. Fill with Ambient Darkness (Deep Abyss)
+        this.lightCtx.globalCompositeOperation = 'source-over';
+        this.lightCtx.fillStyle = '#000818'; // Very dark blue base
+        this.lightCtx.fillRect(0, 0, w, h);
+
+        // 2. Add Lights (Lighter Mode)
+        this.lightCtx.globalCompositeOperation = 'lighter';
+
+        // Player Light
+        const pHead = entities.player.points[0];
+        if (pHead) {
+            const screenPos = camera.worldToScreen(pHead.x, pHead.y);
+            const radius = Math.max(10, pHead.radius * camera.zoom * 6); // Ensure visible
+            this.drawLight(screenPos.x, screenPos.y, radius, '#44ffff'); // Cyan glow
+        }
+
+        // Enemies
+        entities.enemies.forEach(e => {
+            if (!e.active || !e.points || !e.points[0]) return;
+            const head = e.points[0];
+            const screenPos = camera.worldToScreen(head.x, head.y);
+
+            // Optimization: Skip if off-screen
+            if (screenPos.x < -100 || screenPos.x > w + 100 || screenPos.y < -100 || screenPos.y > h + 100) return;
+
+            const radius = Math.max(10, head.radius * camera.zoom * 4);
+            this.drawLight(screenPos.x, screenPos.y, radius, e.color);
+        });
+
+        // Food (Small lights)
+        entities.food.forEach(f => {
+            const screenPos = camera.worldToScreen(f.x, f.y);
+            // Optimization: Skip food
+            if (screenPos.x < -20 || screenPos.x > w + 20 || screenPos.y < -20 || screenPos.y > h + 20) return;
+
+            const radius = Math.max(5, f.radius * camera.zoom * 3);
+            this.drawLight(screenPos.x, screenPos.y, radius, f.color);
+        });
+    }
+
+    drawLight(x, y, radius, color) {
+        // Create simple radial gradient
+        const grad = this.lightCtx.createRadialGradient(x, y, 0, x, y, radius);
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+        this.lightCtx.fillStyle = grad;
+        this.lightCtx.beginPath();
+        this.lightCtx.arc(x, y, radius, 0, Math.PI * 2);
+        this.lightCtx.fill();
+    }
+
+    render(mainCtx) {
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+
+        if (this.settings.fxEnabled) {
+            // Apply Dynamic Lighting (Multiply Blend Mode)
+            // This tints the game with the light map.
+            // Dark areas in light map become dark in game. Light areas reveal game color.
+            mainCtx.save();
+            mainCtx.globalCompositeOperation = 'multiply';
+            mainCtx.drawImage(this.lightCanvas, 0, 0);
+            mainCtx.restore();
+        }
+
+        // Vignette (Always visible for atmosphere)
+        mainCtx.save();
+        mainCtx.globalCompositeOperation = 'source-over';
+        const grad = mainCtx.createRadialGradient(w/2, h/2, h*0.4, w/2, h/2, h*0.9);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.85)');
+
+        mainCtx.fillStyle = grad;
+        mainCtx.fillRect(0, 0, w, h);
+        mainCtx.restore();
+    }
+}
+
+
+// --- js/biomes.js ---
+
+
+class BiomeManager {
+    constructor(game) {
+        this.game = game;
+
+        // Define Biomes
+        this.biomes = [
+            {
+                name: "The Shallows",
+                color: "#001020", // Deep Blue
+                particles: "#aaffff",
+                hazard: null,
+                enemyTypes: ['hunter', 'grazer'],
+                depthStart: 0
+            },
+            {
+                name: "Algae Forest",
+                color: "#001810", // Dark Greenish
+                particles: "#00ff88",
+                hazard: "obscure", // Fog
+                enemyTypes: ['grazer', 'hunter'], // More grazers
+                depthStart: 2000
+            },
+            {
+                name: "Thermal Vents",
+                color: "#180500", // Dark Red
+                particles: "#ff4400",
+                hazard: "current", // Push force
+                enemyTypes: ['hunter', 'titan'],
+                depthStart: 5000
+            },
+            {
+                name: "The Void",
+                color: "#050010", // Purple Black
+                particles: "#aa00ff",
+                hazard: "void",
+                enemyTypes: ['titan', 'titan'], // Only big stuff
+                depthStart: 10000
+            }
+        ];
+    }
+
+    getCurrentBiome(x, y) {
+        // Biomes are radial based on distance from origin (Depth)
+        // Or perlin noise? User asked for "Infinite Map".
+        // Distance-based is easiest for infinite progression feeling.
+        const dist = Math.hypot(x, y);
+
+        // Find deepest biome that matches distance
+        for (let i = this.biomes.length - 1; i >= 0; i--) {
+            if (dist >= this.biomes[i].depthStart) {
+                return this.biomes[i];
+            }
+        }
+        return this.biomes[0];
+    }
+
+    update(dt, player) {
+        const head = player.points[0];
+        const biome = this.getCurrentBiome(head.x, head.y);
+
+        // Apply Hazards
+        if (biome.hazard === 'current') {
+            // Push player in random direction (simulating turbulence)
+            const time = Date.now() * 0.001;
+            const forceX = Math.cos(time) * 1000;
+            const forceY = Math.sin(time) * 1000;
+
+            // Only apply to body points
+            player.points.forEach(p => {
+                p.x += forceX * dt * dt;
+                p.y += forceY * dt * dt;
+            });
+        }
+
+        // Return biome info for renderer/spawner
+        return biome;
+    }
+}
+
+
+// --- js/legacy.js ---
+// Legacy System (Roguelite Progression)
+
+const LEGACY_UPGRADES = {
+    'StartSize': { name: 'Cell Division', desc: 'Start with more mass.', cost: 100, max: 5 },
+    'Speed': { name: 'Flagella Boost', desc: 'Permanent +5% Speed.', cost: 150, max: 10 },
+    'Vision': { name: 'Compound Eyes', desc: 'Permanent +10% View Distance.', cost: 200, max: 5 },
+    'Efficiency': { name: 'Metabolism', desc: 'Food gives +10% more DNA.', cost: 300, max: 5 }
+};
+
+class LegacyManager {
+    constructor() {
+        this.legacyDNA = 0;
+        this.upgrades = {};
+        this.load();
+    }
+
+    load() {
+        const saved = localStorage.getItem('jelly_legacy');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.legacyDNA = data.dna || 0;
+            this.upgrades = data.upgrades || {};
+        }
+    }
+
+    save() {
+        localStorage.setItem('jelly_legacy', JSON.stringify({
+            dna: this.legacyDNA,
+            upgrades: this.upgrades
+        }));
+    }
+
+    // Called on Death
+    convertMassToLegacy(mass) {
+        // Exchange Rate: 10 Mass = 1 Legacy DNA
+        const earned = Math.floor(mass / 10);
+        this.legacyDNA += earned;
+        this.save();
+        return earned;
+    }
+
+    buyUpgrade(key) {
+        const up = LEGACY_UPGRADES[key];
+        if (!up) return false;
+
+        const currentLevel = this.upgrades[key] || 0;
+        if (currentLevel >= up.max) return false;
+
+        // Cost Scaling: Base * (Level + 1)
+        const cost = up.cost * (currentLevel + 1);
+
+        if (this.legacyDNA >= cost) {
+            this.legacyDNA -= cost;
+            this.upgrades[key] = currentLevel + 1;
+            this.save();
+            return true;
+        }
+        return false;
+    }
+
+    getBuffs() {
+        return {
+            startMass: (this.upgrades['StartSize'] || 0) * 5,
+            speedMult: 1 + (this.upgrades['Speed'] || 0) * 0.05,
+            visionMult: 1 + (this.upgrades['Vision'] || 0) * 0.1,
+            dnaMult: 1 + (this.upgrades['Efficiency'] || 0) * 0.1
+        };
+    }
+}
+
+
+
+
+// --- js/social.js ---
+class Social {
+    constructor() {}
+
+    static exportCreature(creature) {
+        // Serialize creature configuration to Base64
+        const data = {
+            parts: creature.parts,
+            color: creature.color,
+            name: "Jelly-" + Math.floor(Math.random()*1000)
+        };
+        const json = JSON.stringify(data);
+        return btoa(json);
+    }
+
+    static importCreature(code) {
+        try {
+            const json = atob(code);
+            const data = JSON.parse(json);
+            return data;
+        } catch (e) {
+            console.error("Invalid DNA Code", e);
+            return null;
+        }
+    }
+
+    static copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert("DNA Copied to Clipboard!");
+        }).catch(err => {
+            console.error('Async: Could not copy text: ', err);
+            // Fallback for some mobile browsers if needed, but modern API usually works in secure contexts
+            prompt("Copy this DNA:", text);
+        });
+    }
+}
+
+
 // --- js/editor.js ---
 
 
@@ -2176,6 +2588,10 @@ class Editor {
 
 
 
+
+
+
+
 class GameLoop {
     constructor() {
         this.running = false;
@@ -2193,6 +2609,7 @@ class GameLoop {
         this.camera = new Camera(window.innerWidth, window.innerHeight);
         this.settings = new Settings();
         this.audio = new AudioSystem();
+        this.lighting = new Lighting(this.canvas, this.settings);
         this.renderer = new Renderer(this.ctx, this.camera, this.settings);
 
         // --- JELLY CREATURE (Soft Body) ---
@@ -2207,8 +2624,10 @@ class GameLoop {
 
         this.saveManager = new SaveManager(this);
         this.progression = new Progression(this.saveManager);
+        this.legacyManager = new LegacyManager();
         this.assets = new AssetGenerator();
         this.boidManager = new BoidManager(this.physics);
+        this.biomeManager = new BiomeManager(this);
         this.headAngle = 0;
         this.editor = new Editor(this);
 
@@ -2246,11 +2665,18 @@ class GameLoop {
             <h1>NEON ABYSS</h1>
             <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
                 <button id="play-btn" class="btn-neon">EVOLVE</button>
+                <button id="legacy-btn" class="btn-neon" style="border-color:#f0f; color:#f0f;">ANCESTRAL MEMORY</button>
                 <button id="settings-btn" class="btn-neon" style="font-size:1rem; border-color:#888; color:#888;">SETTINGS</button>
             </div>
             <p style="margin-top:20px; font-size:0.8em; opacity:0.7;">Touch & Drag to Move</p>
         `;
         document.body.appendChild(menu);
+
+        // Legacy Menu
+        const legacyMenu = document.createElement('div');
+        legacyMenu.id = 'legacy-menu';
+        legacyMenu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:200; flex-direction:column; align-items:center; padding:20px; box-sizing:border-box; overflow-y:auto;';
+        document.body.appendChild(legacyMenu);
 
         // Settings Menu
         const settingsMenu = document.createElement('div');
@@ -2261,6 +2687,8 @@ class GameLoop {
             <div style="display:flex; flex-direction:column; gap:15px;">
                 <button id="toggle-fx-btn" class="btn-neon">FX: ON</button>
                 <button id="toggle-audio-btn" class="btn-neon">AUDIO: ON</button>
+                <button id="export-btn" class="btn-neon" style="border-color:#ff0; color:#ff0;">EXPORT DNA</button>
+                <button id="import-btn" class="btn-neon" style="border-color:#ff0; color:#ff0;">IMPORT RIVAL</button>
                 <button id="reset-save-btn" class="btn-neon btn-danger">RESET SAVE</button>
                 <button id="back-btn" class="btn-neon" style="margin-top:20px;">BACK</button>
             </div>
@@ -2320,6 +2748,7 @@ class GameLoop {
             document.getElementById('settings-menu').style.display = 'flex';
             this.updateSettingsButtons();
         };
+        document.getElementById('legacy-btn').onclick = () => this.openLegacyMenu();
         document.getElementById('back-btn').onclick = () => {
             document.getElementById('settings-menu').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
@@ -2332,6 +2761,14 @@ class GameLoop {
         };
         document.getElementById('toggle-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('toggle-audio-btn').onclick = () => this.toggleAudio();
+        document.getElementById('export-btn').onclick = () => {
+            const code = Social.exportCreature(this.creature);
+            Social.copyToClipboard(code);
+        };
+        document.getElementById('import-btn').onclick = () => {
+            const code = prompt("Paste Rival DNA:");
+            if(code) this.spawnRival(code);
+        };
         document.getElementById('pause-trigger-btn').onclick = () => this.pauseGame();
         document.getElementById('respawn-btn').onclick = () => this.respawn();
         document.getElementById('evolve-btn').onclick = () => {
@@ -2400,6 +2837,65 @@ class GameLoop {
         document.getElementById('pause-audio-btn').innerText = audioText;
     }
 
+    openLegacyMenu() {
+        const menu = document.getElementById('legacy-menu');
+        menu.style.display = 'flex';
+        document.getElementById('main-menu').style.display = 'none';
+        this.renderLegacyUI();
+    }
+
+    renderLegacyUI() {
+        const menu = document.getElementById('legacy-menu');
+        const dna = this.legacyManager.legacyDNA;
+
+        let html = `
+            <h1 style="color:#f0f; font-family:Orbitron;">ANCESTRAL MEMORY</h1>
+            <h3 style="color:#fff;">LEGACY DNA: ${dna}</h3>
+            <div class="upgrade-grid" style="display:flex; flex-wrap:wrap; gap:20px; justify-content:center; width:100%; max-width:600px;">
+        `;
+
+        for (const [key, up] of Object.entries(LEGACY_UPGRADES)) {
+            const level = this.legacyManager.upgrades[key] || 0;
+            const cost = up.cost * (level + 1);
+            const isMax = level >= up.max;
+            const canAfford = dna >= cost && !isMax;
+
+            html += `
+                <div class="upgrade-card" style="border:1px solid #f0f; padding:15px; width:250px; background:rgba(20,0,20,0.8); text-align:left;">
+                    <h3 style="color:#f0f; margin:0;">${up.name}</h3>
+                    <p style="color:#aaa; font-size:0.8rem;">${up.desc}</p>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                        <span style="color:#fff;">Lvl ${level}/${up.max}</span>
+                        <button onclick="game.buyLegacy('${key}')"
+                            style="padding:5px 10px; background:${canAfford ? '#f0f' : '#444'}; border:none; color:#fff; cursor:${canAfford ? 'pointer' : 'default'};">
+                            ${isMax ? 'MAX' : cost + ' DNA'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `</div>
+            <button id="legacy-back-btn" class="btn-neon" style="margin-top:30px;">BACK</button>
+        `;
+
+        menu.innerHTML = html;
+
+        document.getElementById('legacy-back-btn').onclick = () => {
+            menu.style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+        };
+    }
+
+    buyLegacy(key) {
+        if (this.legacyManager.buyUpgrade(key)) {
+            if(navigator.vibrate) navigator.vibrate([50, 50]);
+            this.renderLegacyUI(); // Refresh
+        } else {
+            if(navigator.vibrate) navigator.vibrate(200); // Error
+        }
+    }
+
     pauseGame(isUnlock = false) {
         if (this.gameState === 'playing') {
             this.gameState = 'paused';
@@ -2462,18 +2958,31 @@ class GameLoop {
                 this.creature.constraints.push(link);
             }
         }
-        this.creature.stats.calculate(this.creature.parts);
+        this.creature.stats.calculate(this.creature.parts, this.legacyManager.getBuffs());
     }
 
     respawn() {
+        // Convert Mass to Legacy DNA before reset
+        const earned = this.legacyManager.convertMassToLegacy(this.creature.gameStats.mass);
+        alert(`Extinction Event.
+Ancestral DNA Gained: ${earned}`);
+
         document.getElementById('game-over').style.display = 'none';
         this.creature.gameStats.health = this.creature.gameStats.maxHealth;
-        this.creature.gameStats.mass = 10; // Reset to base size (Rebirth)
+
+        // Apply Start Size Legacy
+        const buffs = this.legacyManager.getBuffs();
+        this.creature.gameStats.mass = 10 + buffs.startMass;
+
         this.saveManager.save();
         this.resetCreature();
         this.camera.x = 0;
         this.camera.y = 0;
-        this.gameState = 'playing';
+        this.gameState = 'menu'; // Go to menu to spend points? Or playing?
+        // User flow: Death -> Rebirth Button -> Playing.
+        // Let's go to menu to allow upgrades.
+        document.getElementById('main-menu').style.display = 'flex';
+        document.getElementById('game-hud').style.display = 'none';
     }
 
     resize() {
@@ -2484,6 +2993,7 @@ class GameLoop {
         this.canvas.width = this.width;
         this.canvas.height = this.height;
         this.camera.resize(this.width, this.height);
+        if (this.lighting) this.lighting.resize(this.width, this.height);
     }
 
     spawnFood(count) {
@@ -2510,35 +3020,57 @@ class GameLoop {
         }
     }
 
+    spawnRival(code) {
+        const data = Social.importCreature(code);
+        if (!data) { alert("Invalid DNA"); return; }
+
+        // Spawn Rival as a powerful Titan-like enemy
+        const head = this.creature.points[0];
+        const dist = 1000;
+        const angle = Math.random() * Math.PI * 2;
+        const x = head.x + Math.cos(angle) * dist;
+        const y = head.y + Math.sin(angle) * dist;
+
+        const rival = new Enemy(x, y, 10, this.physics, 'titan');
+        rival.parts = data.parts; // Override parts
+        rival.color = data.color;
+        // Recalculate rival stats based on imported parts
+        rival.stats.calculate(rival.parts);
+        rival.health = 500; rival.maxHealth = 500; // Boss health
+        rival.active = true;
+
+        this.enemies.push(rival);
+        alert("RIVAL DETECTED: A new apex predator has entered the ecosystem.");
+    }
+
     spawnEnemies() {
-        const targetCount = 12 + Math.floor(this.creature.gameStats.mass / 50); // Scale population
+        const targetCount = 12 + Math.floor(this.creature.gameStats.mass / 50);
         if (this.enemies.length >= targetCount) return;
 
         const playerScale = Math.sqrt(this.creature.gameStats.mass / 10);
-        const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
-
-        // Spawn distance scales with player to prevent popping
-        const spawnDist = 1000 * Math.max(1, playerScale * 0.5) + 500;
-
         const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
         const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
 
+        // Use Biome Manager for difficulty/types
+        const currentBiome = this.biomeManager.getCurrentBiome(playerX, playerY);
+
+        const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
+        const spawnDist = 1000 * Math.max(1, playerScale * 0.5) + 500;
         const angle = Math.random() * Math.PI * 2;
         const ex = playerX + Math.cos(angle) * spawnDist;
         const ey = playerY + Math.sin(angle) * spawnDist;
 
-        // Biome Logic
-        if (difficulty > 8 && Math.random() < 0.1) {
-            // Abyss: Titan
-            this.enemies.push(new Enemy(ex, ey, difficulty * 1.5, this.physics, 'titan'));
-        } else if (Math.random() < 0.4) {
-            // Grazers (Flock)
-            const flockSize = 3 + Math.floor(Math.random() * 4);
-            const flock = this.boidManager.createFlock(ex, ey, flockSize, difficulty, 'grazer');
-            this.enemies.push(...flock);
+        // Pick type based on Biome
+        const type = currentBiome.enemyTypes[Math.floor(Math.random() * currentBiome.enemyTypes.length)];
+
+        if (type === 'titan') {
+             this.enemies.push(new Enemy(ex, ey, difficulty * 1.5, this.physics, 'titan'));
+        } else if (type === 'grazer') {
+             const flockSize = 3 + Math.floor(Math.random() * 4);
+             const flock = this.boidManager.createFlock(ex, ey, flockSize, difficulty, 'grazer');
+             this.enemies.push(...flock);
         } else {
-            // Hunters
-            this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
+             this.enemies.push(new Enemy(ex, ey, difficulty, this.physics, 'hunter'));
         }
     }
 
@@ -2738,6 +3270,9 @@ class GameLoop {
 
         this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
 
+        // Update Biome Effects
+        this.biomeManager.update(dt, this.creature);
+
         for (let i = this.debris.length - 1; i >= 0; i--) {
             const d = this.debris[i];
             d.update(dt, this.physics);
@@ -2828,21 +3363,25 @@ class GameLoop {
     }
 
     render() {
-        // Dynamic Background based on Mass (Depth)
-        const depth = Math.min(1, this.creature.gameStats.mass / 500);
+        // Update Lighting (Offscreen)
+        if (this.settings.fxEnabled && this.gameState === 'playing') {
+            this.lighting.update(this.camera, {
+                player: this.creature,
+                enemies: this.enemies,
+                food: this.food
+            });
+        }
 
-        // Interpolate Color: Dark Blue -> Abyss Black
-        // Top: #000510 -> #000000
-        // Bottom: #001020 -> #100010 (Purple tint)
+        // Dynamic Background based on Biome
+        const head = this.creature.points[0];
+        const biome = this.biomeManager.getCurrentBiome(head ? head.x : 0, head ? head.y : 0);
 
-        const r1 = 0, g1 = Math.floor(5 * (1-depth)), b1 = Math.floor(16 * (1-depth));
-        const r2 = Math.floor(16 * depth), g2 = 0, b2 = Math.floor(32 * (1-depth*0.5));
-
-        const col1 = `rgb(${r1},${g1},${b1})`;
-        const col2 = `rgb(${r2},${g2},${b2})`;
+        // Interpolate towards biome color? (Simple for now: Just use biome color)
+        // Ideally we lerp, but for "Infinite Map" distinct zones are okay.
 
         const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
-        bgGrad.addColorStop(0, col1); bgGrad.addColorStop(1, col2);
+        bgGrad.addColorStop(0, '#000000');
+        bgGrad.addColorStop(1, biome.color);
         this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
 
         // --- LAYER 0: GOD RAYS (Parallax 0.0) ---
@@ -2927,6 +3466,9 @@ class GameLoop {
         this.bgFore.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
         this.ctx.restore();
         this.ctx.globalAlpha = 1.0;
+
+        // Apply Lighting Overlay (Multiply) & Vignette
+        this.lighting.render(this.ctx);
 
         if (this.input.active && !this.editor.active && this.gameState === 'playing') {
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';

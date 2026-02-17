@@ -17,6 +17,11 @@ def bundle():
         'js/enemy.js',
         'js/boids.js',
         'js/debris.js',
+        'js/ik.js',
+        'js/lighting.js',
+        'js/biomes.js',
+        'js/legacy.js',
+        'js/social.js',
         'js/editor.js',
         'js/gameloop.js'
     ]
