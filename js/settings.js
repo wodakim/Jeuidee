@@ -1,6 +1,6 @@
 export default class Settings {
     constructor() {
-        this.fxEnabled = true;
+        this.fxEnabled = false; // Default to OFF for performance
         this.audioEnabled = true;
         this.load();
     }

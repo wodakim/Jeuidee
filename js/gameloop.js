@@ -257,7 +257,15 @@ class GameLoop {
     }
 
     toggleFX() {
-        const state = this.settings.toggleFX();
+        if (!this.settings.fxEnabled) {
+             // Turning ON -> Show Warning
+             if(confirm("WARNING: High Performance Required.\nEnable advanced visual effects? (Battery Drain / Lag possible)")) {
+                 this.settings.toggleFX();
+             }
+        } else {
+             // Turning OFF
+             this.settings.toggleFX();
+        }
         this.updateSettingsButtons();
     }
 

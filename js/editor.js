@@ -238,16 +238,19 @@ export default class Editor {
         const bone = closest.point;
         let spineVec = { x: 0, y: 0 };
 
-        if (closest.index === 0) {
-            const next = this.game.creature.points[1];
-            if (next) spineVec = { x: bone.x - next.x, y: bone.y - next.y };
-        } else if (closest.index === this.game.creature.points.length - 1) {
-            const prev = this.game.creature.points[closest.index - 1];
-            if (prev) spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
-        } else {
-            const prev = this.game.creature.points[closest.index - 1];
+        // Consistent Spine Direction: Always Head to Tail?
+        // Or bone to prev/next?
+        // Let's define forward as "Towards Tail".
+        // index 0 = Head. index N = Tail.
+        // So Forward is P[i] -> P[i+1]
+
+        if (closest.index < this.game.creature.points.length - 1) {
             const next = this.game.creature.points[closest.index + 1];
-            if (prev && next) spineVec = { x: next.x - prev.x, y: next.y - prev.y };
+            spineVec = { x: next.x - bone.x, y: next.y - bone.y };
+        } else {
+            // Tail
+            const prev = this.game.creature.points[closest.index - 1];
+            spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
         }
 
         const len = Math.hypot(spineVec.x, spineVec.y) || 1;
@@ -255,15 +258,40 @@ export default class Editor {
 
         const dropWorld = this.game.camera.screenToWorld(dragX, dragY);
         const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
+        // const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
+        // dropVec.x /= dropLen; dropVec.y /= dropLen; // Use raw distance for relative positioning?
+        // Normalize dropVec for dot product angle check
         const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
-        dropVec.x /= dropLen; dropVec.y /= dropLen;
+        const normDropX = dropVec.x / dropLen;
+        const normDropY = dropVec.y / dropLen;
 
-        const dot = spineVec.x * dropVec.x + spineVec.y * dropVec.y;
-        const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
+        const dot = spineVec.x * normDropX + spineVec.y * normDropY;
+        const cross = spineVec.x * normDropY - spineVec.y * normDropX;
 
-        if (dot > 0.7) return 0;
-        if (cross > 0) return 1;
-        return -1;
+        // Dot: 1 = Front (Tailwards), -1 = Back (Headwards)
+        // Wait, if Forward is Head->Tail:
+        // Dot > 0 means towards Tail (Behind).
+        // Dot < 0 means towards Head (In Front).
+        // User says: "put something on head, it goes behind".
+        // Head is index 0. Forward is P0 -> P1.
+        // If we drop "in front" of head (P(-1)), that is vector P0 -> P(-1).
+        // This is opposite to P0 -> P1. So Dot < 0.
+
+        // Let's refine "Front/Center" detection.
+        // It applies if the drop is roughly aligned with the spine axis, not side.
+        // But for Head (Index 0), "Front" is definitely "In front of face".
+
+        if (closest.index === 0 && dot < -0.7) return 0; // Front of Head
+
+        // For Tail, "Front" (Back?) is behind tail.
+        // if (closest.index === tail && dot > 0.7) return 0; // Tip of Tail (maybe not needed)
+
+        // Sides:
+        // Cross > 0: Left side relative to spine vector
+        // Cross < 0: Right side
+
+        if (cross > 0) return 1; // Left
+        return -1; // Right
     }
 
     endDrag(e) {
@@ -384,8 +412,18 @@ export default class Editor {
                 if (this.selectedBone) {
                     const scale = parseFloat(e.target.value);
                     if (!this.selectedBone.p.initialBaseRadius) this.selectedBone.p.initialBaseRadius = this.selectedBone.p.baseRadius;
-                    this.selectedBone.p.baseRadius = this.selectedBone.p.initialBaseRadius * scale;
+
+                    // Live Update
+                    const newRadius = this.selectedBone.p.initialBaseRadius * scale;
+                    this.selectedBone.p.baseRadius = newRadius;
+                    this.selectedBone.p.radius = newRadius; // Force visual update now
                     this.selectedBone.p.scaleFactor = scale;
+
+                    // Force Render in next loop (Gameloop renders anyway, but ensure radius is used)
+                    // The gameloop uses baseRadius to reset radius during update(),
+                    // but we might need to update constraints if they depend on radius?
+                    // Physics constraints are length based, not radius based usually.
+                    // But soft body collision uses radius.
                 }
             });
         }
