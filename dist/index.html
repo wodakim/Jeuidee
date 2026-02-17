@@ -264,7 +264,7 @@ class AudioSystem {
 
         // Reverb / Echo
         this.delay = this.ctx.createDelay();
-        this.delay.delayTime.value = 0.3; // 300ms echo
+        this.delay.delayTime.value = 0.1; // 100ms echo
         this.delayFeedback = this.ctx.createGain();
         this.delayFeedback.gain.value = 0.4;
         this.delayFilter = this.ctx.createBiquadFilter();
@@ -288,14 +288,14 @@ class AudioSystem {
         // Deep Sea Drone (Low sine + modulation)
         const osc = this.ctx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.value = 50;
+        osc.frequency.value = 15;
 
         const mod = this.ctx.createOscillator();
         mod.type = 'sine';
-        mod.frequency.value = 0.1; // Slow throb
+        mod.frequency.value = 0.05; // Slow throb
 
         const modGain = this.ctx.createGain();
-        modGain.gain.value = 10;
+        modGain.gain.value = 20;
 
         mod.connect(modGain);
         modGain.connect(osc.frequency);
@@ -374,7 +374,7 @@ class AudioSystem {
 class Physics {
     constructor() {
         this.gravity = 0;
-        this.friction = 0.90; // Decreased friction from 0.92 for more "glide"
+        this.friction = 0.94; // Decreased friction from 0.92 for more "glide"
         this.elasticity = 0.5;
     }
 
@@ -2083,6 +2083,7 @@ class Editor {
         this.dragY = 0;
 
         this.symmetry = false;
+        this.sellMode = false;
         this.clone = null; // Petri Dish Clone
 
         setTimeout(() => this.setupUI(), 100);
@@ -2102,15 +2103,22 @@ class Editor {
                 <div style="display:flex; gap:10px;">
                     <button id="add-vertebra-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">+ BONE (10)</button>
                     <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">SYM: OFF</button>
+                    <button id="toggle-sell-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px; border-color:#fa0; color:#fa0;">SELL: OFF</button>
                     <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; font-size:0.8rem; padding:5px 15px;">PLAY</button>
                 </div>
+            </div>
+
+            <!-- Zoom Controls -->
+            <div style="position:absolute; top:80px; right:20px; display:flex; flex-direction:column; gap:10px; pointer-events:auto;">
+                <button id="zoom-in-btn" class="btn-neon" style="width:40px; height:40px; border-radius:50%; font-size:1.5rem; padding:0;">+</button>
+                <button id="zoom-out-btn" class="btn-neon" style="width:40px; height:40px; border-radius:50%; font-size:1.5rem; padding:0;">-</button>
             </div>
 
             <div id="editor-parts-list" style="position:absolute; bottom:0; left:0; width:100%; height:100px; background:rgba(0,0,0,0.9); display:flex; overflow-x:auto; align-items:center; gap:10px; padding:10px; box-sizing:border-box; pointer-events:auto; border-top:1px solid #333; white-space:nowrap;">
                 <!-- Populated Dynamically -->
             </div>
 
-            <div style="position:absolute; top:70px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
+            <div id="editor-instruction" style="position:absolute; top:70px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
                 DRAG PARTS TO BODY • TAP BONE TO RESIZE
             </div>
         `;
@@ -2120,6 +2128,9 @@ class Editor {
         document.getElementById('close-editor-btn').addEventListener('click', () => this.toggle(false));
         document.getElementById('add-vertebra-btn').addEventListener('click', () => this.addVertebra());
         document.getElementById('toggle-mirror-btn').addEventListener('click', () => this.toggleSymmetry());
+        document.getElementById('toggle-sell-btn').addEventListener('click', () => this.toggleSellMode());
+        document.getElementById('zoom-in-btn').addEventListener('click', () => this.zoomCamera(0.2));
+        document.getElementById('zoom-out-btn').addEventListener('click', () => this.zoomCamera(-0.2));
 
         // Drag Listeners
         window.addEventListener('mousemove', (e) => this.onDrag(e));
@@ -2170,6 +2181,8 @@ class Editor {
                 this.enterPetriMode();
                 this.updateDNA();
                 this.refreshParts();
+                this.sellMode = false;
+                this.updateSellBtn();
             } else {
                 this.exitPetriMode();
                 this.hideResizeSlider();
@@ -2242,6 +2255,28 @@ class Editor {
     exitPetriMode() {
         const target = this.game.creature;
 
+        // --- SPAWN ALLY (Old Evolution) ---
+        // Capture the state BEFORE applying changes
+        if (target.points.length > 0) {
+            const oldData = {
+                parts: JSON.parse(JSON.stringify(target.parts)),
+                points: target.points.map(p => ({
+                    x: p.x, y: p.y,
+                    baseRadius: p.baseRadius,
+                    mass: p.mass,
+                    radius: p.radius
+                })),
+                gameStats: { ...target.gameStats },
+                color: target.color
+            };
+
+            const startX = target.points[0].x;
+            const startY = target.points[0].y;
+
+            this.game.spawnAlly(oldData, startX, startY);
+        }
+        // ----------------------------------
+
         // Copy Parts
         target.parts = JSON.parse(JSON.stringify(this.clone.parts));
 
@@ -2312,12 +2347,44 @@ class Editor {
         this.game.camera.vy = 0;
     }
 
+    zoomCamera(delta) {
+        const cam = this.game.camera;
+        let newZoom = cam.zoom + delta;
+        newZoom = Math.min(newZoom, 3.0);
+        newZoom = Math.max(newZoom, 0.2);
+
+        cam.zoom = newZoom;
+        cam.targetZoom = newZoom;
+    }
+
     toggleSymmetry() {
         this.symmetry = !this.symmetry;
         const btn = document.getElementById('toggle-mirror-btn');
         btn.innerText = `SYM: ${this.symmetry ? 'ON' : 'OFF'}`;
         btn.style.borderColor = this.symmetry ? '#0f0' : '#0ff';
         btn.style.color = this.symmetry ? '#0f0' : '#0ff';
+    }
+
+    toggleSellMode() {
+        this.sellMode = !this.sellMode;
+        this.updateSellBtn();
+
+        const txt = document.getElementById('editor-instruction');
+        if (this.sellMode) {
+             txt.innerText = "TAP PART TO SELL (REFUND 50%)";
+             txt.style.color = "#fa0";
+        } else {
+             txt.innerText = "DRAG PARTS TO BODY • TAP BONE TO RESIZE";
+             txt.style.color = "rgba(255,255,255,0.5)";
+        }
+    }
+
+    updateSellBtn() {
+        const btn = document.getElementById('toggle-sell-btn');
+        if (btn) {
+             btn.innerText = `SELL: ${this.sellMode ? 'ON' : 'OFF'}`;
+             btn.style.background = this.sellMode ? 'rgba(255,170,0,0.2)' : 'transparent';
+        }
     }
 
     updateDNA() {
@@ -2356,6 +2423,7 @@ class Editor {
     }
 
     startDrag(e, type) {
+        if (this.sellMode) return; // Disable dragging in sell mode
         this.isDragging = true;
         this.selectedPart = type;
         const pt = this.getEventPos(e);
@@ -2489,14 +2557,15 @@ class Editor {
         if (clickedBone) {
             const radiusScreen = clickedBone.p.radius * cam.zoom;
 
-            if (clickedBone.dist < radiusScreen * 0.8) {
-                this.selectedBone = clickedBone;
-                this.showResizeSlider(clickedBone);
-            } else {
-                // Remove Part Logic (Target CLONE)
-                const parts = this.clone.parts || [];
-                const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
-                if (boneParts.length > 0) {
+            // Check if clicked ON a part attached to this bone
+            const parts = this.clone.parts || [];
+            const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
+
+            // Logic: Is click strictly on bone or part?
+            // Simplified: If SELL MODE is ON, remove parts. If OFF, resize bone.
+
+            if (this.sellMode) {
+                 if (boneParts.length > 0) {
                     const toRemove = boneParts[boneParts.length - 1];
                     const cost = PARTS_DB[toRemove.type] ? PARTS_DB[toRemove.type].cost : 5;
                     this.clone.gameStats.dna += Math.floor(cost * 0.5);
@@ -2505,11 +2574,12 @@ class Editor {
                     if (idx > -1) parts.splice(idx, 1);
 
                     this.updateDNA();
-                    if (navigator.vibrate) navigator.vibrate(20);
-                } else {
-                    this.selectedBone = clickedBone;
-                    this.showResizeSlider(clickedBone);
-                }
+                    if (navigator.vibrate) navigator.vibrate(50);
+                 }
+            } else {
+                 // Resize Mode
+                 this.selectedBone = clickedBone;
+                 this.showResizeSlider(clickedBone);
             }
         } else {
             this.selectedBone = null;
@@ -2580,7 +2650,6 @@ class Editor {
         ctx.beginPath();
         ctx.arc(0, 0, DISH_RADIUS, 0, Math.PI*2);
         ctx.stroke();
-        ctx.restore();
 
         // Render Clone Creature
         if (this.clone) {
@@ -2588,6 +2657,8 @@ class Editor {
             ctx.globalCompositeOperation = 'source-over';
             this.game.renderer.drawCreature(this.clone, -Math.PI/2); // Head pointing up
         }
+
+        ctx.restore();
 
         if (this.selectedBone) {
             const cam = this.game.camera;
@@ -3219,6 +3290,7 @@ class Sonar {
 
 
 
+
 class GameLoop {
     constructor() {
         this.running = false;
@@ -3269,6 +3341,7 @@ class GameLoop {
         this.bgFore = [];
 
         this.enemies = [];
+        this.allies = [];
         this.food = [];
         this.debris = [];
         this.particles = [];
@@ -3678,6 +3751,22 @@ Ancestral DNA Gained: ${earned}`);
         }
     }
 
+    spawnAlly(data, x, y) {
+        // Remove existing ally (Single Ally policy)
+        this.allies = [];
+
+        // Add random offset to prevent physics NaN (dist=0) if spawned exactly on player
+        const offsetX = (Math.random() - 0.5) * 50;
+        const offsetY = (Math.random() - 0.5) * 50;
+
+        const ally = new Ally(data, x + offsetX, y + offsetY, this.physics);
+        this.allies.push(ally);
+
+        // Visual Effect
+        this.spawnParticles(x, y, '#00ffff', 20, 300);
+        if(this.settings.audioEnabled) this.audio.playTone(600, 'sine', 1.0);
+    }
+
     spawnRival(code) {
         const data = Social.importCreature(code);
         if (!data) { alert("Invalid DNA"); return; }
@@ -3879,6 +3968,49 @@ Ancestral DNA Gained: ${earned}`);
         this.updateBackgroundOnly(dt);
         this.spawnEnemies();
         this.boidManager.update(dt, this.enemies);
+
+        // Update Allies
+        for (let i = this.allies.length - 1; i >= 0; i--) {
+             const ally = this.allies[i];
+             ally.update(dt, this.enemies, head); // Pass enemies and player head
+
+             // Player vs Ally Collision (Soft Body)
+             Physics.checkSoftBodyCollision(this.creature.points, ally.points);
+
+             // Ally vs Enemies Combat
+             for (let e of this.enemies) {
+                 const res = this.resolveCombat(ally, e);
+                 if (res.hit) {
+                     if (res.playerHit) { // Ally Hit
+                         const dmg = Math.max(0, e.stats.damage - ally.stats.defense);
+                         ally.gameStats.health -= dmg;
+                         // Knockback
+                         const angle = Math.atan2(ally.points[0].y - e.points[0].y, ally.points[0].x - e.points[0].x);
+                         ally.points[0].vx += Math.cos(angle) * 500;
+                         ally.points[0].vy += Math.sin(angle) * 500;
+                     }
+                     if (res.enemyHit) { // Enemy Hit by Ally
+                         const dmg = Math.max(0, ally.stats.damage - e.stats.defense);
+                         e.health -= dmg;
+                         if(e.onHit) e.onHit();
+                         // Knockback
+                         const angle = Math.atan2(e.points[0].y - ally.points[0].y, e.points[0].x - ally.points[0].x);
+                         e.points[0].vx += Math.cos(angle) * 500;
+                         e.points[0].vy += Math.sin(angle) * 500;
+                     }
+                     // Particles
+                     const mx = (ally.points[0].x + e.points[0].x) / 2;
+                     const my = (ally.points[0].y + e.points[0].y) / 2;
+                     this.spawnParticles(mx, my, '#ff00ff', 3, 100);
+                 }
+             }
+
+             if (ally.gameStats.health <= 0) {
+                 this.spawnParticles(ally.points[0].x, ally.points[0].y, '#00ffff', 10, 300);
+                 this.allies.splice(i, 1);
+             }
+        }
+
         this.skillManager.update(dt);
         this.distortion.update(dt);
         this.sonar.update(dt);
@@ -4092,6 +4224,46 @@ Ancestral DNA Gained: ${earned}`);
         }
     }
 
+    drawHUD() {
+        const dna = Math.floor(this.creature.gameStats.dna);
+        const x = this.width / 2;
+        const y = 40;
+
+        this.ctx.save();
+        this.ctx.translate(x, y);
+
+        // Jelly Background
+        const time = Date.now() * 0.002;
+        this.ctx.fillStyle = 'rgba(0, 255, 255, 0.2)';
+        this.ctx.strokeStyle = '#0ff';
+        this.ctx.lineWidth = 2;
+
+        this.ctx.beginPath();
+        // Draw a wobbly oval
+        for (let i = 0; i <= Math.PI * 2; i += 0.1) {
+            const r = 30 + Math.sin(i * 5 + time) * 2 + Math.cos(i * 3 - time) * 2;
+            const px = Math.cos(i) * r * 1.5; // Wider
+            const py = Math.sin(i) * r;
+            if (i === 0) this.ctx.moveTo(px, py);
+            else this.ctx.lineTo(px, py);
+        }
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // DNA Icon/Text
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = 'bold 20px Orbitron, sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.shadowColor = '#0ff';
+        this.ctx.shadowBlur = 10;
+        this.ctx.fillText(`DNA: ${dna}`, 0, 0);
+        this.ctx.shadowBlur = 0;
+
+        this.ctx.restore();
+    }
+
     render() {
         if (this.editor.active) {
             // Petri Dish Render Mode (Exclusive)
@@ -4182,6 +4354,11 @@ Ancestral DNA Gained: ${earned}`);
 
         this.enemies.forEach(e => e.render(this.ctx));
 
+        // Render Allies
+        this.allies.forEach(a => {
+            this.renderer.drawCreature(a, a.headAngle || 0);
+        });
+
         if (this.gameState === 'playing' || this.gameState === 'paused') {
             this.renderer.drawCreature(this.creature, this.headAngle);
         }
@@ -4201,6 +4378,8 @@ Ancestral DNA Gained: ${earned}`);
         this.lighting.render(this.ctx);
         this.distortion.render(this.ctx, this.camera);
         this.sonar.render(this.ctx, this.camera);
+
+        if (this.gameState === 'playing') this.drawHUD();
 
         if (this.input.active && !this.editor.active && this.gameState === 'playing') {
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';

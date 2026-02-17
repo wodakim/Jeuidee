@@ -13,6 +13,7 @@ export default class Editor {
         this.dragY = 0;
 
         this.symmetry = false;
+        this.sellMode = false;
         this.clone = null; // Petri Dish Clone
 
         setTimeout(() => this.setupUI(), 100);
@@ -32,15 +33,22 @@ export default class Editor {
                 <div style="display:flex; gap:10px;">
                     <button id="add-vertebra-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">+ BONE (10)</button>
                     <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">SYM: OFF</button>
+                    <button id="toggle-sell-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px; border-color:#fa0; color:#fa0;">SELL: OFF</button>
                     <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; font-size:0.8rem; padding:5px 15px;">PLAY</button>
                 </div>
+            </div>
+
+            <!-- Zoom Controls -->
+            <div style="position:absolute; top:80px; right:20px; display:flex; flex-direction:column; gap:10px; pointer-events:auto;">
+                <button id="zoom-in-btn" class="btn-neon" style="width:40px; height:40px; border-radius:50%; font-size:1.5rem; padding:0;">+</button>
+                <button id="zoom-out-btn" class="btn-neon" style="width:40px; height:40px; border-radius:50%; font-size:1.5rem; padding:0;">-</button>
             </div>
 
             <div id="editor-parts-list" style="position:absolute; bottom:0; left:0; width:100%; height:100px; background:rgba(0,0,0,0.9); display:flex; overflow-x:auto; align-items:center; gap:10px; padding:10px; box-sizing:border-box; pointer-events:auto; border-top:1px solid #333; white-space:nowrap;">
                 <!-- Populated Dynamically -->
             </div>
 
-            <div style="position:absolute; top:70px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
+            <div id="editor-instruction" style="position:absolute; top:70px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
                 DRAG PARTS TO BODY • TAP BONE TO RESIZE
             </div>
         `;
@@ -50,6 +58,9 @@ export default class Editor {
         document.getElementById('close-editor-btn').addEventListener('click', () => this.toggle(false));
         document.getElementById('add-vertebra-btn').addEventListener('click', () => this.addVertebra());
         document.getElementById('toggle-mirror-btn').addEventListener('click', () => this.toggleSymmetry());
+        document.getElementById('toggle-sell-btn').addEventListener('click', () => this.toggleSellMode());
+        document.getElementById('zoom-in-btn').addEventListener('click', () => this.zoomCamera(0.2));
+        document.getElementById('zoom-out-btn').addEventListener('click', () => this.zoomCamera(-0.2));
 
         // Drag Listeners
         window.addEventListener('mousemove', (e) => this.onDrag(e));
@@ -100,6 +111,8 @@ export default class Editor {
                 this.enterPetriMode();
                 this.updateDNA();
                 this.refreshParts();
+                this.sellMode = false;
+                this.updateSellBtn();
             } else {
                 this.exitPetriMode();
                 this.hideResizeSlider();
@@ -264,12 +277,44 @@ export default class Editor {
         this.game.camera.vy = 0;
     }
 
+    zoomCamera(delta) {
+        const cam = this.game.camera;
+        let newZoom = cam.zoom + delta;
+        newZoom = Math.min(newZoom, 3.0);
+        newZoom = Math.max(newZoom, 0.2);
+
+        cam.zoom = newZoom;
+        cam.targetZoom = newZoom;
+    }
+
     toggleSymmetry() {
         this.symmetry = !this.symmetry;
         const btn = document.getElementById('toggle-mirror-btn');
         btn.innerText = `SYM: ${this.symmetry ? 'ON' : 'OFF'}`;
         btn.style.borderColor = this.symmetry ? '#0f0' : '#0ff';
         btn.style.color = this.symmetry ? '#0f0' : '#0ff';
+    }
+
+    toggleSellMode() {
+        this.sellMode = !this.sellMode;
+        this.updateSellBtn();
+
+        const txt = document.getElementById('editor-instruction');
+        if (this.sellMode) {
+             txt.innerText = "TAP PART TO SELL (REFUND 50%)";
+             txt.style.color = "#fa0";
+        } else {
+             txt.innerText = "DRAG PARTS TO BODY • TAP BONE TO RESIZE";
+             txt.style.color = "rgba(255,255,255,0.5)";
+        }
+    }
+
+    updateSellBtn() {
+        const btn = document.getElementById('toggle-sell-btn');
+        if (btn) {
+             btn.innerText = `SELL: ${this.sellMode ? 'ON' : 'OFF'}`;
+             btn.style.background = this.sellMode ? 'rgba(255,170,0,0.2)' : 'transparent';
+        }
     }
 
     updateDNA() {
@@ -308,6 +353,7 @@ export default class Editor {
     }
 
     startDrag(e, type) {
+        if (this.sellMode) return; // Disable dragging in sell mode
         this.isDragging = true;
         this.selectedPart = type;
         const pt = this.getEventPos(e);
@@ -441,14 +487,15 @@ export default class Editor {
         if (clickedBone) {
             const radiusScreen = clickedBone.p.radius * cam.zoom;
 
-            if (clickedBone.dist < radiusScreen * 0.8) {
-                this.selectedBone = clickedBone;
-                this.showResizeSlider(clickedBone);
-            } else {
-                // Remove Part Logic (Target CLONE)
-                const parts = this.clone.parts || [];
-                const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
-                if (boneParts.length > 0) {
+            // Check if clicked ON a part attached to this bone
+            const parts = this.clone.parts || [];
+            const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
+
+            // Logic: Is click strictly on bone or part?
+            // Simplified: If SELL MODE is ON, remove parts. If OFF, resize bone.
+
+            if (this.sellMode) {
+                 if (boneParts.length > 0) {
                     const toRemove = boneParts[boneParts.length - 1];
                     const cost = PARTS_DB[toRemove.type] ? PARTS_DB[toRemove.type].cost : 5;
                     this.clone.gameStats.dna += Math.floor(cost * 0.5);
@@ -457,11 +504,12 @@ export default class Editor {
                     if (idx > -1) parts.splice(idx, 1);
 
                     this.updateDNA();
-                    if (navigator.vibrate) navigator.vibrate(20);
-                } else {
-                    this.selectedBone = clickedBone;
-                    this.showResizeSlider(clickedBone);
-                }
+                    if (navigator.vibrate) navigator.vibrate(50);
+                 }
+            } else {
+                 // Resize Mode
+                 this.selectedBone = clickedBone;
+                 this.showResizeSlider(clickedBone);
             }
         } else {
             this.selectedBone = null;
