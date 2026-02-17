@@ -7,7 +7,7 @@ export default class AudioSystem {
 
         // Reverb / Echo
         this.delay = this.ctx.createDelay();
-        this.delay.delayTime.value = 0.3; // 300ms echo
+        this.delay.delayTime.value = 0.1; // 100ms echo
         this.delayFeedback = this.ctx.createGain();
         this.delayFeedback.gain.value = 0.4;
         this.delayFilter = this.ctx.createBiquadFilter();
@@ -31,14 +31,14 @@ export default class AudioSystem {
         // Deep Sea Drone (Low sine + modulation)
         const osc = this.ctx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.value = 50;
+        osc.frequency.value = 15;
 
         const mod = this.ctx.createOscillator();
         mod.type = 'sine';
-        mod.frequency.value = 0.1; // Slow throb
+        mod.frequency.value = 0.05; // Slow throb
 
         const modGain = this.ctx.createGain();
-        modGain.gain.value = 10;
+        modGain.gain.value = 20;
 
         mod.connect(modGain);
         modGain.connect(osc.frequency);
