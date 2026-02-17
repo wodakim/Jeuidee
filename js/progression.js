@@ -4,56 +4,56 @@ const PARTS_DB = {
         desc: 'Increases Swim Speed and Turn Rate.',
         stat: '+ Speed',
         unlocked: true, // Default
-        cost: 5
+        cost: 25
     },
     'Spike': {
         name: 'Spike',
         desc: 'Deals damage on contact. Increases Defense.',
         stat: '+ Damage',
         unlocked: true, // Default
-        cost: 5
+        cost: 25
     },
     'Jaws': {
         name: 'Carnivore Jaw',
         desc: 'Frontal weapon. High damage.',
         stat: '++ Damage',
         unlocked: true, // Default
-        cost: 10
+        cost: 50
     },
     'Eye': {
         name: 'Eye',
         desc: 'Increases Field of View.',
         stat: '+ Vision',
         unlocked: true, // Default
-        cost: 5
+        cost: 20
     },
     'Tentacle': {
         name: 'Tentacle',
         desc: 'Wiggles and pushes enemies away.',
         stat: '+ Control',
         unlocked: false,
-        cost: 10
+        cost: 40
     },
     'Shield': {
         name: 'Chitin Plate',
         desc: 'Heavy armor that reduces incoming damage.',
         stat: '++ Defense',
         unlocked: false,
-        cost: 10
+        cost: 40
     },
     'Booster': {
         name: 'Jet Gland',
         desc: 'Burst of speed when moving forward.',
         stat: '++ Speed',
         unlocked: false,
-        cost: 15
+        cost: 60
     },
     'Poison': {
         name: 'Toxin Sac',
         desc: 'Enemies take damage over time after contact.',
         stat: '+ Poison',
         unlocked: false,
-        cost: 15
+        cost: 60
     }
 };
 

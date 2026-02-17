@@ -96,14 +96,8 @@ export default class Enemy {
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) this.pickState(playerHead);
 
-        // Steering
         let head = this.points[0];
         let dx = 0, dy = 0;
-
-        // Boids Logic overrides standard steering if in a flock and type is grazer
-        // This is handled by BoidManager, but we need to respect the result.
-        // Actually, let's allow BoidManager to modify position/velocity directly,
-        // and here we add the "Goal" steering (Chase/Flee/Wander).
 
         if (this.state === 'chase') {
             dx = playerHead.x - head.x;
@@ -112,6 +106,7 @@ export default class Enemy {
             dx = head.x - playerHead.x;
             dy = head.y - playerHead.y;
         } else {
+            // Wander
             dx = this.targetX - head.x;
             dy = this.targetY - head.y;
             if (Math.hypot(dx, dy) < 50) this.pickState(playerHead);
@@ -119,32 +114,63 @@ export default class Enemy {
 
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
-            const force = this.stats.speed * dt * dt; // Apply as impulse
-            // If grazer, reduce individual steering influence to let flocking work better
+            const force = this.stats.speed * dt * dt;
             const weight = this.type === 'grazer' ? 0.3 : 1.0;
 
             head.x += (dx / dist) * force * weight;
             head.y += (dy / dist) * force * weight;
         }
 
-        // Physics
         this.physics.update(this.points, this.constraints, dt);
     }
 
     pickState(playerHead) {
-        this.stateTimer = Math.random() * 3 + 1;
+        this.stateTimer = 1.0 + Math.random();
 
-        const dist = Math.hypot(playerHead.x - this.points[0].x, playerHead.y - this.points[0].y);
-        const aggroRange = this.type === 'grazer' ? 200 : 400 * this.scale;
+        const head = this.points[0];
+        const dist = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
+        const aggroRange = 600 * this.scale;
 
+        // Decision Logic
+        // 1. Health Critical? -> Flee
+        if (this.health < this.maxHealth * 0.3) {
+            this.state = 'flee';
+            this.color = '#ffaa00'; // Fear color
+            return;
+        }
+
+        // 2. Player Nearby?
         if (dist < aggroRange) {
-             // Aggressive if difficulty is high
-             if (this.type !== 'grazer' && this.difficulty > 3) this.state = 'chase';
-             else this.state = 'flee';
+            if (this.type === 'grazer') {
+                this.state = 'flee';
+            } else if (this.type === 'titan') {
+                this.state = 'chase';
+            } else {
+                // Hunter: Compare size/strength
+                // Simplistic: if player > 1.5x me, flee
+                // Need player radius reference? playerHead has radius property usually?
+                // Let's assume passed playerHead is just coordinate.
+                // We'll trust difficulty/scale for now.
+                // If I am small (diff < 5) and player is huge?
+                // Random chance to be brave or coward
+                if (Math.random() > 0.3) this.state = 'chase';
+                else this.state = 'flee';
+            }
         } else {
             this.state = 'wander';
-            this.targetX = this.points[0].x + (Math.random()-0.5) * 500;
-            this.targetY = this.points[0].y + (Math.random()-0.5) * 500;
+            // Wander logic: Pick point in front or random
+            this.targetX = head.x + (Math.random()-0.5) * 1000;
+            this.targetY = head.y + (Math.random()-0.5) * 1000;
+        }
+    }
+
+    // Called when damaged
+    onHit(sourceX, sourceY) {
+        // Counter attack logic
+        this.health -= 10; // Placeholder damage if not handled in gameloop
+        if (this.health > 0 && this.type !== 'grazer') {
+            this.state = 'chase'; // Aggro
+            this.stateTimer = 5.0; // Focus on player
         }
     }
 
