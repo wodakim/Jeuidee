@@ -624,9 +624,8 @@ class GameLoop {
 
     update(dt) {
         if (this.editor.active) {
-            this.physics.update(this.creature.points, this.creature.constraints, dt * 0.1);
-            const head = this.creature.points[0];
-            this.camera.update(head.x, head.y, 0, 0, dt, this.creature.gameStats.mass);
+            // In Petri Mode, we don't update game physics
+            // We just update the camera slightly if needed or nothing
             return;
         }
 
@@ -882,6 +881,12 @@ class GameLoop {
     }
 
     render() {
+        if (this.editor.active) {
+            // Petri Dish Render Mode (Exclusive)
+            this.editor.render(this.ctx);
+            return;
+        }
+
         // Update Lighting (Offscreen)
         if (this.settings.fxEnabled && this.gameState === 'playing') {
             this.lighting.update(this.camera, {
@@ -894,9 +899,6 @@ class GameLoop {
         // Dynamic Background based on Biome
         const head = this.creature.points[0];
         const biome = this.biomeManager.getCurrentBiome(head ? head.x : 0, head ? head.y : 0);
-
-        // Interpolate towards biome color? (Simple for now: Just use biome color)
-        // Ideally we lerp, but for "Infinite Map" distinct zones are okay.
 
         const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
         bgGrad.addColorStop(0, '#000000');
@@ -970,9 +972,6 @@ class GameLoop {
 
         if (this.gameState === 'playing' || this.gameState === 'paused') {
             this.renderer.drawCreature(this.creature, this.headAngle);
-
-            // Diegetic UI: Removed Health Bar
-            // Health is now visualized via creature glow/color in Renderer
         }
 
         this.camera.restore(this.ctx);
@@ -1002,8 +1001,6 @@ class GameLoop {
             this.ctx.arc(this.input.currX, this.input.currY, 20, 0, Math.PI * 2);
             this.ctx.fill();
         }
-
-        this.editor.render(this.ctx);
     }
 }
 
