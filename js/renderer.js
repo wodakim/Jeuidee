@@ -149,6 +149,7 @@ export default class Renderer {
         let sideAngle = 0;
         if (side === 1) sideAngle = Math.PI/2;
         else if (side === -1) sideAngle = -Math.PI/2;
+        else if (side === 2) sideAngle = Math.PI; // Nose/Tail Tip
 
         this.ctx.rotate(spineAngle + sideAngle);
 

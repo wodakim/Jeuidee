@@ -785,6 +785,8 @@ class GameLoop {
             if (btn && btn.style.display === 'none') btn.style.display = 'block';
         }
 
+        // Base Zoom: Further away for gameplay (0.7x default)
+        // Camera Update handles dynamic zoom based on mass, but we can tune the base scale there.
         this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
 
         // Update Biome Effects
