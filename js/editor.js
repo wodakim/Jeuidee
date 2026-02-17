@@ -203,6 +203,10 @@ export default class Editor {
     fitCamera() {
         if (!this.clone || this.clone.points.length === 0) return;
 
+        // Center vertically in the Petri Dish (which is at 0,0)
+        // But the creature grows downwards.
+        // Let's fit the CREATURE bounds, but center the CAMERA on the creature.
+
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         this.clone.points.forEach(p => {
             minX = Math.min(minX, p.x - p.radius);
@@ -214,7 +218,8 @@ export default class Editor {
         const width = maxX - minX;
         const height = maxY - minY;
 
-        const padding = 300;
+        // Tighter fit for mobile
+        const padding = 150;
         const desiredW = width + padding;
         const desiredH = height + padding;
 
@@ -222,11 +227,12 @@ export default class Editor {
         const zoomY = (this.game.height - 160) / desiredH;
 
         let targetZoom = Math.min(zoomX, zoomY);
-        targetZoom = Math.min(targetZoom, 2.5);
-        targetZoom = Math.max(targetZoom, 0.5);
+        targetZoom = Math.min(targetZoom, 3.0); // Allow closer zoom for small creatures
+        targetZoom = Math.max(targetZoom, 0.8); // Don't zoom out too far
 
         this.game.camera.targetZoom = targetZoom;
         this.game.camera.x = 0;
+        // Center on creature bounds
         this.game.camera.y = (minY + maxY) / 2;
         this.game.camera.vx = 0;
         this.game.camera.vy = 0;
@@ -492,10 +498,14 @@ export default class Editor {
         ctx.scale(this.game.camera.zoom, this.game.camera.zoom);
         ctx.translate(-this.game.camera.x, -this.game.camera.y);
 
+        // Smaller Petri Dish Rim to frame the creature
+        // Radius should encompass the creature comfortably.
+        // Let's use a fixed size that looks like a dish on screen, or dynamic?
+        // User requested reduction. 400 is good for mobile.
         ctx.strokeStyle = '#222';
         ctx.lineWidth = 5;
         ctx.beginPath();
-        ctx.arc(0, 0, 1000, 0, Math.PI*2); // Petri dish rim
+        ctx.arc(0, 0, 400, 0, Math.PI*2); // Reduced from 1000
         ctx.stroke();
         ctx.restore();
 
