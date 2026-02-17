@@ -8,38 +8,6 @@ export default class Renderer {
     }
 
     drawCreature(creature, headAngle = 0) {
-        // Shadow Pass (Fake 3D Depth)
-        // Draw the entire creature silhouette offset
-        this.ctx.save();
-        this.ctx.translate(10, 10); // Shadow offset
-        this.ctx.globalAlpha = 0.3;
-        this.ctx.fillStyle = '#000';
-        // Blur
-        this.ctx.filter = 'blur(5px)';
-
-        // Draw simplified shadow blobs
-        for (let p of creature.points) {
-             this.ctx.beginPath();
-             this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
-             this.ctx.fill();
-        }
-
-        if (creature.parts) {
-             // Draw parts shadow roughly
-             creature.parts.forEach(part => {
-                 const bone = creature.points[part.boneIndex];
-                 if(!bone) return;
-                 // Just a circle for part shadow for performance
-                 this.ctx.beginPath();
-                 this.ctx.arc(bone.x, bone.y, bone.radius * 1.5, 0, Math.PI*2);
-                 this.ctx.fill();
-             });
-        }
-
-        this.ctx.filter = 'none';
-        this.ctx.restore();
-
-
         // Enable Additive Blending for "Bioluminescent" look if enabled
         if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
 
@@ -58,39 +26,27 @@ export default class Renderer {
             color = pulse > 0.5 ? '#ff0000' : color;
         }
 
-        // Draw Soft Body Connections (Jelly Skin)
-        // We can draw a path around the outer points if we want a continuous skin,
-        // but the "blob" look works well for cells.
-        // Let's stick to blobs but with 3D shading.
-
         for (let i = points.length - 1; i >= 0; i--) {
             const p = points[i];
 
-            // 3D Spherical Gradient
-            // Highlight offset to top-left (-radius*0.3)
-            const r = p.radius;
-            const grad = this.ctx.createRadialGradient(
-                p.x - r * 0.3, p.y - r * 0.3, r * 0.1, // Highlight
-                p.x, p.y, r // Edge
-            );
+            // Glow intensity based on health
+            const glowSize = 2.5 * (0.5 + 0.5 * healthPct);
 
-            // Adjust color brightness for gradient
-            grad.addColorStop(0, '#ffffff'); // Specular Highlight
-            grad.addColorStop(0.3, color);   // Main Color
-            grad.addColorStop(1, 'rgba(0, 0, 0, 0.1)'); // Darker edge for volume
+            // Glow
+            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * glowSize);
+            grad.addColorStop(0, color);
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
             this.ctx.fillStyle = grad;
             this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            this.ctx.arc(p.x, p.y, p.radius * 2.5, 0, Math.PI * 2);
             this.ctx.fill();
 
-            // Inner Nucleus / Glow (if high health)
-            if (healthPct > 0.5) {
-                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, r * 0.4, 0, Math.PI * 2);
-                this.ctx.fill();
-            }
+            // Core
+            this.ctx.fillStyle = 'white'; // White core for brightness
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.radius * 0.6, 0, Math.PI * 2);
+            this.ctx.fill();
         }
 
         // Draw Attached Parts
@@ -127,27 +83,16 @@ export default class Renderer {
         this.ctx.rotate(headAngle);
         this.ctx.scale(scale, scale);
 
-        // 3D Eye
         this.ctx.fillStyle = 'white';
         this.ctx.beginPath();
         this.ctx.arc(10, -8, 6, 0, Math.PI*2);
         this.ctx.arc(10, 8, 6, 0, Math.PI*2);
         this.ctx.fill();
-
-        // Pupils
         this.ctx.fillStyle = 'black';
         this.ctx.beginPath();
         this.ctx.arc(13, -8, 3, 0, Math.PI*2);
         this.ctx.arc(13, 8, 3, 0, Math.PI*2);
         this.ctx.fill();
-
-        // Eye Reflection
-        this.ctx.fillStyle = 'white';
-        this.ctx.beginPath();
-        this.ctx.arc(14, -9, 1, 0, Math.PI*2);
-        this.ctx.arc(14, 7, 1, 0, Math.PI*2);
-        this.ctx.fill();
-
         this.ctx.restore();
     }
 
@@ -218,9 +163,7 @@ export default class Renderer {
         this.ctx.scale(scale, scale);
 
         if (type === 'Fin') {
-            // Translucent Fin
             this.ctx.fillStyle = bodyColor;
-            this.ctx.globalAlpha = 0.7;
             if (this.settings.fxEnabled) {
                 this.ctx.shadowColor = bodyColor;
                 this.ctx.shadowBlur = 20;
@@ -230,26 +173,9 @@ export default class Renderer {
             this.ctx.quadraticCurveTo(15, -15, 40, 0);
             this.ctx.quadraticCurveTo(15, 15, 0, 0);
             this.ctx.fill();
-
-            // Fin Ribs
-            this.ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-            this.ctx.lineWidth = 1;
-            this.ctx.beginPath();
-            this.ctx.moveTo(0,0); this.ctx.lineTo(30, -5);
-            this.ctx.moveTo(0,0); this.ctx.lineTo(35, 0);
-            this.ctx.moveTo(0,0); this.ctx.lineTo(30, 5);
-            this.ctx.stroke();
-
-            this.ctx.globalAlpha = 1.0;
             this.ctx.shadowBlur = 0;
         } else if (type === 'Spike') {
-            // Metallic/Chitin Spike
-            const grad = this.ctx.createLinearGradient(0, -8, 35, 8);
-            grad.addColorStop(0, '#ff4444');
-            grad.addColorStop(0.5, '#ff8888');
-            grad.addColorStop(1, '#660000');
-
-            this.ctx.fillStyle = grad;
+            this.ctx.fillStyle = '#ff0044';
             if (this.settings.fxEnabled) {
                 this.ctx.shadowColor = '#f04';
                 this.ctx.shadowBlur = 15;
@@ -282,11 +208,7 @@ export default class Renderer {
             this.ctx.arc(14, 0, 2, 0, Math.PI*2);
             this.ctx.fill();
         } else if (type === 'Shield') {
-            // Chitin Plate
-            const grad = this.ctx.createRadialGradient(0,0, 0, 0,0, 20);
-            grad.addColorStop(0, '#666');
-            grad.addColorStop(1, '#333');
-            this.ctx.fillStyle = grad;
+            this.ctx.fillStyle = '#444';
             this.ctx.strokeStyle = '#888';
             this.ctx.lineWidth = 2;
             this.ctx.beginPath();
