@@ -11,7 +11,7 @@ export default class Camera {
         // Settings
         this.followStrength = 0.05; // Lerp factor (lower = smoother/lazier)
         this.lookAhead = 100; // How far to look ahead based on velocity
-        this.baseZoom = 1.0;
+        this.baseZoom = 0.7; // Default "Far" zoom for gameplay (was 1.0)
     }
 
     resize(w, h) {

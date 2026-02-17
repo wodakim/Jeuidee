@@ -555,7 +555,7 @@ class Camera {
         // Settings
         this.followStrength = 0.05; // Lerp factor (lower = smoother/lazier)
         this.lookAhead = 100; // How far to look ahead based on velocity
-        this.baseZoom = 1.0;
+        this.baseZoom = 0.7; // Default "Far" zoom for gameplay (was 1.0)
     }
 
     resize(w, h) {
@@ -897,6 +897,7 @@ class Renderer {
         let sideAngle = 0;
         if (side === 1) sideAngle = Math.PI/2;
         else if (side === -1) sideAngle = -Math.PI/2;
+        else if (side === 2) sideAngle = Math.PI; // Nose/Tail Tip
 
         this.ctx.rotate(spineAngle + sideAngle);
 
@@ -2261,7 +2262,10 @@ class Editor {
     getClosestBone(pt) {
         const cam = this.game.camera;
         let closest = null;
-        let minDist = 80;
+        // Increased Hitbox for easier mobile selection
+        // Dynamic based on Zoom?
+        // Let's use a fixed large screen radius.
+        let minDist = 120;
 
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
@@ -2269,6 +2273,7 @@ class Editor {
             const dy = sp.y - pt.y;
             const d = Math.sqrt(dx*dx + dy*dy);
 
+            // Prioritize closer bones, but allow selection within large radius
             if (d < minDist) {
                 minDist = d;
                 closest = { point: p, index: index, sp: sp };
@@ -2324,7 +2329,67 @@ class Editor {
         // It applies if the drop is roughly aligned with the spine axis, not side.
         // But for Head (Index 0), "Front" is definitely "In front of face".
 
-        if (closest.index === 0 && dot < -0.7) return 0; // Front of Head
+        // If Dot < -0.7, it means "In front of P0".
+        // HOWEVER, in Renderer.js, when boneIndex === 0, spineAngle is rotated by PI (180 deg).
+        // This means the local coordinate system of the Head is FLIPPED.
+        // So "Front" in world space (Dot < -0.7) becomes "Back" in local space if we don't account for it.
+        // But side=0 usually means "no rotation" or "aligned with spine".
+        // In renderer: ctx.rotate(spineAngle + sideAngle).
+        // If index=0, spineAngle += PI.
+        // So if side=0, rotation is PI. Which points BACKWARDS (towards body).
+
+        // So for HEAD (Index 0):
+        // We want it to point FORWARD (Away from body).
+        // Forward is Angle(P0->P(-1)). Which is opposite to SpineAngle(P0->P1).
+        // SpineAngle points P0->P1 (Backwards).
+        // So we want rotation 0 relative to World Forward?
+        // If SpineAngle is PI (Back), then we need sideAngle = PI to cancel it out and point Forward (0)?
+        // Or if side=0 means "Aligned with Bone Rotation", and Bone Rotation is Backwards...
+
+        // Let's look at Renderer logic for Eye/Jaws on Head.
+        // They use side=1 or -1 for sides.
+        // Jaws use side=0 (Center).
+        // Jaws Render: "ctx.moveTo(0, -10)..." -> Points Right in local space? No, standard draw.
+        // If local space is rotated 180 (PI), then standard draw points Left (Backwards).
+
+        // CONCLUSION:
+        // For Head (Index 0), side=0 points BACK into the body because of the +PI rotation in renderer.
+        // To point FORWARD (out of mouth), we likely need side=0 to be interpreted as "Front".
+        // But wait, if Jaws are side=0, and they look correct (sticking out front), then my assumption about Jaws render is wrong OR renderer handles Jaws specifically?
+        // Renderer: "if (part.boneIndex === 0) spineAngle += Math.PI;"
+        // This flips the coordinate system.
+        // So X+ points towards P1 (Body).
+        // So drawing on X+ (standard) puts it inside body.
+        // Jaws drawing: "ctx.moveTo(0, -10)..." -> Drawn around 0,0.
+        // It seems Jaws are centered on bone.
+        // BUT if we want a Spike on the NOSE?
+        // Spike draws: "moveTo(0, -8), lineTo(35, 0)..." -> Points along X+.
+        // If X+ points to Body, Spike points into Body.
+
+        // FIX:
+        // If we want Spike on Nose (Forward), we need it to point along X- (Negative X).
+        // Or rotate it by PI.
+        // If we set side = 0 (Center), it uses rotation 0.
+        // So it points X+ (Into Body).
+
+        // If we want it to point OUT, we need rotation PI?
+        // Side 1 = PI/2. Side -1 = -PI/2.
+        // Side 2 = PI? (Back of head?)
+
+        // Let's adjust calcSide to return a special value for Head Front?
+        // Or just interpret side=0 as "Front" for Head, and ensure Renderer rotates it correctly?
+        // Currently side=0 is treated as 0 rotation.
+        // If we change Renderer, it affects existing creatures? Maybe.
+
+        // Let's change calcSide to return a value that RESULTS in the correct visual.
+        // If user drags to Front of Face (Dot < -0.7):
+        // We want it to point OUT.
+        // If X+ is IN, we want X-.
+        // So we need rotation PI.
+        // Let's try returning side=2 for "Tip of Nose"?
+        // And update Renderer to handle side=2 as Math.PI.
+
+        if (closest.index === 0 && dot < -0.7) return 2; // Special "Nose" slot
 
         // For Tail, "Front" (Back?) is behind tail.
         // if (closest.index === tail && dot > 0.7) return 0; // Tip of Tail (maybe not needed)
@@ -2475,6 +2540,12 @@ class Editor {
         slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x - 75)}px`; // Clamp to screen
         slider.style.top = `${selection.sp.y - 80}px`;
 
+        // Ensure scaleFactor is set based on current radius if not present
+        if (selection.p.scaleFactor === undefined) {
+             const base = selection.p.initialBaseRadius || 20; // fallback default
+             selection.p.scaleFactor = selection.p.baseRadius / base;
+        }
+
         const currentScale = selection.p.scaleFactor || 1.0;
         document.getElementById('bone-scale').value = currentScale;
     }
@@ -2522,10 +2593,25 @@ class Editor {
             const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
 
             if (closest) {
+                // Visualize Snap Target (Bone Highlight)
+                ctx.save();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(closest.sp.x, closest.sp.y, closest.point.radius * this.game.camera.zoom * 1.5, 0, Math.PI*2);
+                ctx.stroke();
+                ctx.restore();
+
                 const bone = closest.point;
-                const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1];
-                let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
-                if (closest.index === 0) spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
+                // Re-calculate spine vec logic for preview (must match Renderer)
+                let spineVec = { x: 0, y: 0 };
+                if (closest.index < this.game.creature.points.length - 1) {
+                    const next = this.game.creature.points[closest.index + 1];
+                    spineVec = { x: next.x - bone.x, y: next.y - bone.y };
+                } else {
+                    const prev = this.game.creature.points[closest.index - 1];
+                    spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
+                }
 
                 const side = this.calcSide(closest, this.dragX, this.dragY);
                 const spineAngle = Math.atan2(spineVec.y, spineVec.x) + (closest.index===0 ? Math.PI : 0);
@@ -3881,6 +3967,8 @@ Ancestral DNA Gained: ${earned}`);
             if (btn && btn.style.display === 'none') btn.style.display = 'block';
         }
 
+        // Base Zoom: Further away for gameplay (0.7x default)
+        // Camera Update handles dynamic zoom based on mass, but we can tune the base scale there.
         this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
 
         // Update Biome Effects
