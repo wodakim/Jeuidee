@@ -7,45 +7,40 @@ export default class Editor {
         this.active = false;
 
         // Editor State
-        this.selectedPart = null; // 'Fin', 'Spike', etc.
+        this.selectedPart = null;
         this.isDragging = false;
         this.dragX = 0;
         this.dragY = 0;
 
-        // Options
-        this.symmetry = false; // Mirror mode
+        this.symmetry = false;
 
-        // Setup UI immediately
         setTimeout(() => this.setupUI(), 100);
     }
 
     setupUI() {
-        // Toggle Overlay
         this.overlay = document.createElement('div');
         this.overlay.id = 'editor-overlay';
-        this.overlay.style.position = 'absolute';
-        this.overlay.style.top = '0';
-        this.overlay.style.left = '0';
-        this.overlay.style.width = '100%';
-        this.overlay.style.height = '100%';
-        this.overlay.style.display = 'none';
-        this.overlay.style.pointerEvents = 'none'; // Let clicks pass to canvas if needed
-        this.overlay.style.zIndex = '2000'; // Ensure above Ad Space
+        this.overlay.style = `position:absolute; top:0; left:0; width:100%; height:100%; display:none; pointer-events:none; z-index:2000; font-family:Orbitron;`;
 
-        // HTML Content with Classes
+        // Revised Layout for Mobile: Bottom Bar for Parts, Top Bar for Controls
         this.overlay.innerHTML = `
-            <div class="editor-controls">
-                <button id="add-vertebra-btn" class="btn-neon">+ BONE (10)</button>
-                <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem;">SYMMETRY: OFF</button>
-                <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; box-shadow:0 0 10px rgba(255,0,255,0.2);">PLAY</button>
+            <div style="position:absolute; top:0; left:0; width:100%; height:60px; background:rgba(0,0,0,0.8); display:flex; justify-content:space-between; align-items:center; padding:0 10px; box-sizing:border-box; pointer-events:auto; border-bottom:1px solid #333;">
+                <div style="color:#0ff; font-size:1.2rem; text-shadow:0 0 10px #0ff;">
+                    WORKBENCH <span id="editor-dna" style="font-size:0.7em; color:#fff; margin-left:10px;">DNA: 0</span>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button id="add-vertebra-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">+ BONE (10)</button>
+                    <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">SYM: OFF</button>
+                    <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; font-size:0.8rem; padding:5px 15px;">PLAY</button>
+                </div>
             </div>
 
-            <div class="editor-sidebar right" id="editor-parts-list" style="pointer-events: auto;">
+            <div id="editor-parts-list" style="position:absolute; bottom:0; left:0; width:100%; height:100px; background:rgba(0,0,0,0.9); display:flex; overflow-x:auto; align-items:center; gap:10px; padding:10px; box-sizing:border-box; pointer-events:auto; border-top:1px solid #333; white-space:nowrap;">
                 <!-- Populated Dynamically -->
             </div>
 
-            <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:'Orbitron'; font-size:1.5rem; text-shadow:0 0 10px #0ff;">
-                WORKBENCH <div id="editor-dna" style="font-size:0.8em; color:#fff; margin-top:5px;">DNA: 0</div>
+            <div style="position:absolute; top:70px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
+                DRAG PARTS TO BODY • TAP BONE TO RESIZE
             </div>
         `;
         document.body.appendChild(this.overlay);
@@ -55,13 +50,12 @@ export default class Editor {
         document.getElementById('add-vertebra-btn').addEventListener('click', () => this.addVertebra());
         document.getElementById('toggle-mirror-btn').addEventListener('click', () => this.toggleSymmetry());
 
-        // Global Drag Listeners (Window)
+        // Drag Listeners
         window.addEventListener('mousemove', (e) => this.onDrag(e));
         window.addEventListener('touchmove', (e) => this.onDrag(e), {passive: false});
         window.addEventListener('mouseup', (e) => this.endDrag(e));
         window.addEventListener('touchend', (e) => this.endDrag(e));
 
-        // Tap on canvas for selection (only when editor active)
         this.game.canvas.addEventListener('mousedown', (e) => this.onCanvasClick(e));
         this.game.canvas.addEventListener('touchstart', (e) => this.onCanvasClick(e), {passive: false});
     }
@@ -74,13 +68,22 @@ export default class Editor {
         unlocked.forEach(key => {
             const part = PARTS_DB[key];
             const div = document.createElement('div');
-            div.className = 'part-item';
-            div.dataset.type = key;
-            div.innerText = `${part.name} (${part.cost})`;
-            div.style.pointerEvents = 'auto'; // Ensure clickable
-            if (key === 'Eye') div.style.color = '#fff';
+            // Card Style
+            div.className = 'part-card';
+            div.style = `
+                min-width:80px; height:80px; border:1px solid #444; background:rgba(20,20,20,0.8);
+                display:flex; flex-direction:column; align-items:center; justify-content:center;
+                border-radius:5px; cursor:grab; user-select:none; color:#aaa; font-size:0.7rem;
+            `;
 
-            // Add Drag Listeners dynamically
+            div.innerHTML = `
+                <div style="font-size:1.5rem; margin-bottom:5px;">${key[0]}</div>
+                <div style="font-weight:bold; color:#fff;">${part.name}</div>
+                <div style="color:#0f0;">${part.cost}</div>
+            `;
+
+            if (key === 'Eye') div.style.borderColor = '#fff';
+
             div.addEventListener('mousedown', (e) => this.startDrag(e, key));
             div.addEventListener('touchstart', (e) => this.startDrag(e, key), {passive: false});
 
@@ -95,24 +98,66 @@ export default class Editor {
             if (active) {
                 this.updateDNA();
                 this.refreshParts();
+                this.fitCamera();
             } else {
                 this.hideResizeSlider();
+                this.game.camera.targetZoom = 1.0; // Reset zoom
             }
         }
 
         if (active) {
-            // Zoom Camera to Creature
-            this.game.camera.targetZoom = 2.5;
-            this.game.input.active = false; // Disable movement
-        } else {
-            this.game.camera.targetZoom = 1.0;
+            this.game.input.active = false;
         }
+    }
+
+    fitCamera() {
+        if (!this.game.creature || this.game.creature.points.length === 0) return;
+
+        // Calculate Bounding Box of Creature
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        this.game.creature.points.forEach(p => {
+            minX = Math.min(minX, p.x - p.radius);
+            maxX = Math.max(maxX, p.x + p.radius);
+            minY = Math.min(minY, p.y - p.radius);
+            maxY = Math.max(maxY, p.y + p.radius);
+        });
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+
+        // Add Padding
+        const padding = 200;
+        const desiredW = width + padding;
+        const desiredH = height + padding;
+
+        // Calculate Zoom
+        // Camera Zoom = Screen Dimension / World Dimension
+        const zoomX = this.game.width / desiredW;
+        const zoomY = (this.game.height - 160) / desiredH; // Subtract UI height (top+bottom bars)
+
+        let targetZoom = Math.min(zoomX, zoomY);
+        targetZoom = Math.min(targetZoom, 2.5); // Max Zoom cap
+        targetZoom = Math.max(targetZoom, 0.5); // Min Zoom cap
+
+        // Set Camera Target
+        // We need to snap camera immediately or smooth? Smooth is better.
+        this.game.camera.targetZoom = targetZoom;
+
+        // Center camera on creature center
+        // Camera normally follows head. In editor, we override update?
+        // Let's force camera position in update() when editor is active.
+        this.game.camera.x = centerX;
+        this.game.camera.y = centerY;
+        this.game.camera.vx = 0;
+        this.game.camera.vy = 0;
     }
 
     toggleSymmetry() {
         this.symmetry = !this.symmetry;
         const btn = document.getElementById('toggle-mirror-btn');
-        btn.innerText = `SYMMETRY: ${this.symmetry ? 'ON' : 'OFF'}`;
+        btn.innerText = `SYM: ${this.symmetry ? 'ON' : 'OFF'}`;
         btn.style.borderColor = this.symmetry ? '#0f0' : '#0ff';
         btn.style.color = this.symmetry ? '#0f0' : '#0ff';
     }
@@ -129,38 +174,32 @@ export default class Editor {
         if (this.game.creature.gameStats.dna < 10) return;
 
         const points = this.game.creature.points;
-        if (points.length >= 20) return;
+        if (points.length >= 30) return; // Increased limit
 
         this.game.creature.gameStats.dna -= 10;
         this.updateDNA();
 
         const last = points[points.length-1];
         const prev = points[points.length-2] || last;
-
-        // Calculate angle
         const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
 
-        // Create new Point
-        const newX = last.x + Math.cos(angle) * 20;
-        const newY = last.y + Math.sin(angle) * 20;
-
-        // Decrease radius slightly
-        const newRadius = Math.max(5, last.radius * 0.9);
+        const newRadius = Math.max(5, last.radius * 0.95);
+        const newX = last.x + Math.cos(angle) * (newRadius * 2); // Space out based on radius
+        const newY = last.y + Math.sin(angle) * (newRadius * 2);
 
         const newP = Physics.createPoint(newX, newY, newRadius, 1);
         newP.baseRadius = newRadius;
 
         points.push(newP);
 
-        // New Constraint
-        const newC = Physics.createConstraint(last, newP, 0.3, 15);
-        newC.baseLength = 15;
+        const newC = Physics.createConstraint(last, newP, 0.5, newRadius * 2); // Stiffer spine
+        newC.baseLength = newRadius * 2;
 
         this.game.creature.constraints.push(newC);
+        this.fitCamera();
     }
 
     startDrag(e, type) {
-        // e.preventDefault();
         this.isDragging = true;
         this.selectedPart = type;
         const pt = this.getEventPos(e);
@@ -170,7 +209,7 @@ export default class Editor {
 
     onDrag(e) {
         if (!this.isDragging) return;
-        // e.preventDefault();
+        // e.preventDefault(); // Prevent scroll on mobile? Yes.
         const pt = this.getEventPos(e);
         this.dragX = pt.x;
         this.dragY = pt.y;
@@ -179,7 +218,7 @@ export default class Editor {
     getClosestBone(pt) {
         const cam = this.game.camera;
         let closest = null;
-        let minDist = 60; // Increased snap radius for easier mobile use
+        let minDist = 80;
 
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
@@ -197,20 +236,15 @@ export default class Editor {
 
     calcSide(closest, dragX, dragY) {
         const bone = closest.point;
-        // Determine spine vector
         let spineVec = { x: 0, y: 0 };
 
-        // Use neighbors to determine "Forward" along spine
         if (closest.index === 0) {
-            // Head: Vector from next bone to head
             const next = this.game.creature.points[1];
             if (next) spineVec = { x: bone.x - next.x, y: bone.y - next.y };
         } else if (closest.index === this.game.creature.points.length - 1) {
-            // Tail: Vector from prev bone to tail
             const prev = this.game.creature.points[closest.index - 1];
             if (prev) spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
         } else {
-            // Body: Average of prev->bone and bone->next? Or just prev->next
             const prev = this.game.creature.points[closest.index - 1];
             const next = this.game.creature.points[closest.index + 1];
             if (prev && next) spineVec = { x: next.x - prev.x, y: next.y - prev.y };
@@ -224,18 +258,12 @@ export default class Editor {
         const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
         dropVec.x /= dropLen; dropVec.y /= dropLen;
 
-        // Dot Product
         const dot = spineVec.x * dropVec.x + spineVec.y * dropVec.y;
-        // Cross Product (2D)
         const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
 
-        // Logic:
-        // If Dot is high (> 0.7), we are "In Line" (Front/Back/Top) -> Side 0
-        // Else Left/Right
-
-        if (dot > 0.7) return 0; // Front/Center
-        if (cross > 0) return 1; // Left
-        return -1; // Right
+        if (dot > 0.7) return 0;
+        if (cross > 0) return 1;
+        return -1;
     }
 
     endDrag(e) {
@@ -246,24 +274,19 @@ export default class Editor {
 
         if (closest) {
             const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
-
-            // Check DNA cost (account for symmetry double cost?)
             let totalCost = cost;
             const side = this.calcSide(closest, this.dragX, this.dragY);
 
             if (this.symmetry && side !== 0) totalCost *= 2;
 
             if (this.game.creature.gameStats.dna < totalCost) {
-                // Feedback: Not enough DNA
                 alert("Not enough DNA!");
                 this.selectedPart = null;
                 return;
             }
 
-            // Add Part
             this.addPart(this.selectedPart, closest.index, side);
 
-            // Symmetry (Only if not center)
             if (this.symmetry && side !== 0) {
                 this.addPart(this.selectedPart, closest.index, -side);
             }
@@ -272,7 +295,6 @@ export default class Editor {
             this.updateDNA();
             this.game.creature.stats.calculate(this.game.creature.parts);
 
-            // Haptic
             if (navigator.vibrate) navigator.vibrate(50);
         }
 
@@ -305,87 +327,37 @@ export default class Editor {
         const pt = this.getEventPos(e);
         const cam = this.game.camera;
 
-        // 1. Check Part Selection (For Removal)
-        // Iterate parts backwards (topmost first)
-        const parts = this.game.creature.parts || [];
-        for (let i = parts.length - 1; i >= 0; i--) {
-            const part = parts[i];
-            const bone = this.game.creature.points[part.boneIndex];
-            if (!bone) continue;
-
-            // Approximate part position on screen
-            // We need to replicate rotation logic... simpler: check distance to bone + offset
-            // Part is roughly at Bone + Radius * SideVector
-            // Let's just check if click is near Bone Surface in the direction of side
-            // This is complex. Simplified: If click is near bone AND not bone center?
-            // Actually, let's just use distance to Bone Center.
-            // If click is within Bone Radius * 2, checks if it's hitting a part?
-
-            // Better: Just check distance to Bone. If we click a bone, we show a menu "Remove Part"?
-            // Or cycle parts?
-            // User requested "Click part to remove".
-            // Let's iterate parts and calculate their world pos.
-
-            let angle = 0; // Logic for angle
-            // ... (Replicating render logic is hard here without duplicating code)
-            // Simplified:
-            // Just assume part is at bone. If we click bone, maybe show a list of attached parts to remove?
-            // Or simpler: If we click a bone, and it has parts, remove the last one?
-            // No, that's annoying.
-
-            // Let's implement a "Sell Mode" toggle or just hold-to-delete?
-            // User: "Tap to remove".
-            // Let's check distance to bone. If < Radius, it's bone select.
-            // If > Radius but < Radius + 40 (Part range), check angle?
-        }
-
-        // Simple Implementation:
-        // If click hits a Bone, check if there are parts attached to it.
-        // If yes, remove the most recent part on that bone and refund.
-        // If no, select bone for resizing.
-
         let clickedBone = null;
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
             const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
-            if (dist < p.radius * cam.zoom * 2.5) { // Hitbox slightly larger for parts
+            if (dist < p.radius * cam.zoom * 2.5) {
                 clickedBone = { p, index, sp, dist: dist };
             }
         });
 
         if (clickedBone) {
-            // Check if we hit the bone center (Resize) or the edge (Part)
-            // Threshold: Radius * Zoom
             const radiusScreen = clickedBone.p.radius * cam.zoom;
 
             if (clickedBone.dist < radiusScreen * 0.8) {
-                // Center Hit -> Resize
                 this.selectedBone = clickedBone;
                 this.showResizeSlider(clickedBone);
             } else {
-                // Edge Hit -> Try Remove Part
-                // Find parts on this bone
+                // Remove Part Logic
+                const parts = this.game.creature.parts || [];
                 const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
                 if (boneParts.length > 0) {
-                    // Remove the last one
                     const toRemove = boneParts[boneParts.length - 1];
-                    // Refund
                     const cost = PARTS_DB[toRemove.type] ? PARTS_DB[toRemove.type].cost : 5;
-                    this.game.creature.gameStats.dna += Math.floor(cost * 0.5); // 50% refund
+                    this.game.creature.gameStats.dna += Math.floor(cost * 0.5);
 
-                    // Remove from main list
                     const idx = parts.indexOf(toRemove);
                     if (idx > -1) parts.splice(idx, 1);
 
                     this.updateDNA();
                     this.game.creature.stats.calculate(this.game.creature.parts);
-
-                    // Feedback
                     if (navigator.vibrate) navigator.vibrate(20);
-                    // Show floating text? (Maybe later)
-                    alert(`Sold ${toRemove.type} for ${Math.floor(cost*0.5)} DNA`);
                 } else {
-                    // No parts, select bone
                     this.selectedBone = clickedBone;
                     this.showResizeSlider(clickedBone);
                 }
@@ -401,8 +373,7 @@ export default class Editor {
         if (!slider) {
             slider = document.createElement('div');
             slider.id = 'resize-slider-container';
-            slider.className = 'glass-panel';
-            slider.style = `position:absolute; width:150px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:5px; pointer-events:auto; z-index:2001;`;
+            slider.style = `position:absolute; width:150px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:5px; pointer-events:auto; z-index:2001; background:rgba(0,0,0,0.8); border:1px solid #0ff; border-radius:10px;`;
             slider.innerHTML = `
                 <div style="font-size:0.8rem; color:#fff;">SCALE</div>
                 <input type="range" id="bone-scale" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
@@ -413,20 +384,16 @@ export default class Editor {
                 if (this.selectedBone) {
                     const scale = parseFloat(e.target.value);
                     if (!this.selectedBone.p.initialBaseRadius) this.selectedBone.p.initialBaseRadius = this.selectedBone.p.baseRadius;
-
-                    // Logic fixed: Slider left (0.5) -> Smaller. Right (1.5) -> Bigger.
                     this.selectedBone.p.baseRadius = this.selectedBone.p.initialBaseRadius * scale;
                     this.selectedBone.p.scaleFactor = scale;
                 }
             });
         }
 
-        // Position Slider near bone
         slider.style.display = 'flex';
-        slider.style.left = `${selection.sp.x + 50}px`;
-        slider.style.top = `${selection.sp.y - 50}px`;
+        slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x - 75)}px`; // Clamp to screen
+        slider.style.top = `${selection.sp.y - 80}px`;
 
-        // Set value
         const currentScale = selection.p.scaleFactor || 1.0;
         document.getElementById('bone-scale').value = currentScale;
     }
@@ -439,17 +406,26 @@ export default class Editor {
     render(ctx) {
         if (!this.active) return;
 
-        // Highlight Selected Bone
+        if (this.game.creature.points.length > 0) {
+             // Keep camera centered if not dragging (or even if dragging?)
+             // Actually, let's just gently nudge it towards center
+             // fitCamera sets absolute position, maybe we just call fitCamera every frame?
+             // No, that prevents panning.
+             // But we disabled input.active, so player can't move.
+             // So camera is static unless we move it.
+             // Let's call fitCamera once on toggle, then maybe allow pan?
+             // For now, static is fine.
+        }
+
         if (this.selectedBone) {
             const cam = this.game.camera;
             const p = this.selectedBone.p;
             const sp = cam.worldToScreen(p.x, p.y);
 
-            // Update slider pos
             const slider = document.getElementById('resize-slider-container');
             if(slider && slider.style.display !== 'none') {
-                 slider.style.left = `${sp.x + 40}px`;
-                 slider.style.top = `${sp.y - 40}px`;
+                 slider.style.left = `${Math.min(window.innerWidth - 160, sp.x - 75)}px`;
+                 slider.style.top = `${sp.y - 80}px`;
             }
 
             ctx.save();
@@ -461,27 +437,20 @@ export default class Editor {
             ctx.restore();
         }
 
-        // Drag Logic
         if (this.isDragging && this.selectedPart) {
-            // Magnet Preview logic
             const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
 
             if (closest) {
-                // Draw Ghost Part
                 const bone = closest.point;
                 const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1];
                 let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
                 if (closest.index === 0) spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
 
-                // Determine Side
                 const side = this.calcSide(closest, this.dragX, this.dragY);
-
-                // Calculate Angle
                 const spineAngle = Math.atan2(spineVec.y, spineVec.x) + (closest.index===0 ? Math.PI : 0);
 
-                // Render Ghost
                 ctx.save();
-                ctx.globalAlpha = 0.5; // Ghostly
+                ctx.globalAlpha = 0.5;
                 const sp = closest.sp;
 
                 ctx.translate(sp.x, sp.y);
@@ -491,31 +460,25 @@ export default class Editor {
                 else if (side === -1) sideAngle = -Math.PI/2;
 
                 ctx.rotate(spineAngle + sideAngle);
-                ctx.translate(bone.radius * this.game.camera.zoom, 0); // Offset by radius scaled
 
+                // Use same scale logic as Renderer
+                const scale = Math.max(0.5, bone.radius / 20); // Estimation
+
+                ctx.translate(bone.radius * this.game.camera.zoom, 0);
+
+                // Draw Preview Dot
                 ctx.fillStyle = '#0ff';
                 if(this.selectedPart === 'Spike') ctx.fillStyle = '#f00';
-                if(side === 0) ctx.fillStyle = '#ff0'; // Highlight center placement
+                if(side === 0) ctx.fillStyle = '#ff0';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, 10, 0, Math.PI*2); // Simple dot preview
+                ctx.arc(0, 0, 10 * scale, 0, Math.PI*2);
                 ctx.fill();
-
-                // Draw Symmetry Ghost (Only if not center)
-                if (this.symmetry && side !== 0) {
-                    ctx.save();
-                    ctx.translate(0, 0); // Reset local
-                    // It's hard to inverse exact transform here without full logic.
-                    // Simplified: just draw a dot on the other side?
-                    // Let's just stick to single ghost for now to avoid complexity bugs.
-                    ctx.restore();
-                }
 
                 ctx.restore();
                 ctx.globalAlpha = 1.0;
             }
 
-            // Draw Icon under finger
             ctx.save();
             ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
             ctx.shadowColor = '#0ff';
@@ -528,7 +491,7 @@ export default class Editor {
             ctx.font = '12px Orbitron';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(this.selectedPart.toUpperCase(), this.dragX, this.dragY);
+            ctx.fillText(this.selectedPart[0], this.dragX, this.dragY);
             ctx.restore();
         }
     }

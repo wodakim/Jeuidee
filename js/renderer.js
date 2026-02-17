@@ -157,6 +157,10 @@ export default class Renderer {
 
         this.ctx.translate(radius, 0);
 
+        // Scale Part based on Bone Radius (Base Radius is approx 20)
+        const scale = Math.max(0.5, radius / 20);
+        this.ctx.scale(scale, scale);
+
         if (type === 'Fin') {
             this.ctx.fillStyle = bodyColor;
             if (this.settings.fxEnabled) {

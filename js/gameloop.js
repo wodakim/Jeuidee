@@ -167,6 +167,7 @@ class GameLoop {
         hud.style = `position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:90;`;
         hud.innerHTML = `
             <button id="pause-trigger-btn" style="position:absolute; top:20px; left:20px; pointer-events:auto; background:rgba(0,0,0,0.5); border:1px solid #0ff; color:#0ff; border-radius:50%; width:40px; height:40px; font-weight:bold; cursor:pointer;">II</button>
+            <button id="sonar-btn" style="position:absolute; bottom:80px; right:20px; pointer-events:auto; background:rgba(0,0,0,0.5); border:2px solid #0ff; color:#0ff; border-radius:50%; width:60px; height:60px; font-weight:bold; cursor:pointer; box-shadow:0 0 10px #0ff; display:flex; justify-content:center; align-items:center; font-size:24px;">((•))</button>
             <button id="evolve-btn" style="display:none; position:absolute; top:20px; right:20px; pointer-events:auto; padding:10px 20px; background:linear-gradient(45deg, #f0f, #00f); border:none; border-radius:20px; font-family:Orbitron; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 10px #f0f;">EVOLVE (10 DNA)</button>
         `;
         document.body.appendChild(hud);
@@ -217,6 +218,13 @@ class GameLoop {
         };
         document.getElementById('pause-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('pause-audio-btn').onclick = () => this.toggleAudio();
+        document.getElementById('sonar-btn').onclick = () => {
+             if(this.sonar.activate()) {
+                 const btn = document.getElementById('sonar-btn');
+                 btn.style.opacity = 0.5;
+                 setTimeout(() => btn.style.opacity = 1.0, 5000);
+             }
+        };
 
         // Unlock Card Click to continue
         document.getElementById('unlock-overlay').onclick = () => {
@@ -429,10 +437,15 @@ class GameLoop {
     }
 
     spawnFood(count) {
+        const head = this.creature.points[0];
+        const center = head ? {x: head.x, y: head.y} : {x:0, y:0};
+
         for(let i=0; i<count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 500 + Math.random() * 2000;
             this.food.push({
-                x: (Math.random()-0.5)*3000,
-                y: (Math.random()-0.5)*3000,
+                x: center.x + Math.cos(angle) * dist,
+                y: center.y + Math.sin(angle) * dist,
                 radius: 5,
                 color: '#0f0'
             });
@@ -493,7 +506,14 @@ class GameLoop {
         const currentBiome = this.biomeManager.getCurrentBiome(playerX, playerY);
 
         const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
-        const spawnDist = 1000 * Math.max(1, playerScale * 0.5) + 500;
+
+        // Ensure spawn distance is less than despawn distance (3000) but far enough to be offscreen
+        // Despawn is 3000. Let's spawn at 1500-2500.
+        // Scale distance slightly with player size, but cap it.
+        const minSpawn = 1200;
+        const maxSpawn = 2500;
+        const spawnDist = minSpawn + Math.random() * (maxSpawn - minSpawn);
+
         const angle = Math.random() * Math.PI * 2;
         const ex = playerX + Math.cos(angle) * spawnDist;
         const ey = playerY + Math.sin(angle) * spawnDist;
@@ -709,9 +729,13 @@ class GameLoop {
             if (e.bossType && e.health <= 0) this.bossActive = false;
         }
 
+        // Maintenance: Remove far food and spawn new food
+        // Remove food > 3000 away
         for (let i = this.food.length - 1; i >= 0; i--) {
             const f = this.food[i];
             const dist = Math.hypot(head.x - f.x, head.y - f.y);
+
+            // Eat Logic
             if (dist < head.radius + f.radius) {
                 this.food.splice(i, 1);
                 const dnaValue = f.dnaValue || 1;
@@ -719,14 +743,33 @@ class GameLoop {
                 this.creature.gameStats.mass += 0.5 * dnaValue;
                 this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
 
-                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera); // Spatial
-                if(navigator.vibrate) navigator.vibrate(20); // Light haptic
+                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera);
+                if(navigator.vibrate) navigator.vibrate(20);
 
                 this.spawnParticles(f.x, f.y, f.color, 5, 100);
+
+                // Immediately spawn replacement nearby to maintain density
                 if (f.type !== 'meat') {
-                     this.food.push({ x: head.x + (Math.random()-0.5)*1000, y: head.y + (Math.random()-0.5)*1000, radius: 5, color: '#0f0' });
+                    const angle = Math.random() * Math.PI * 2;
+                    const d = 500 + Math.random() * 1000;
+                    this.food.push({
+                        x: head.x + Math.cos(angle) * d,
+                        y: head.y + Math.sin(angle) * d,
+                        radius: 5, color: '#0f0'
+                    });
                 }
+                continue;
             }
+
+            // Cleanup Logic
+            if (dist > 3000) {
+                this.food.splice(i, 1);
+            }
+        }
+
+        // Maintain Minimum Food Count in World
+        if (this.food.length < 50) {
+            this.spawnFood(10);
         }
 
         if (this.creature.gameStats.dna >= 10 && !this.editor.active) {

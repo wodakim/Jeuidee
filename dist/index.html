@@ -905,6 +905,10 @@ class Renderer {
 
         this.ctx.translate(radius, 0);
 
+        // Scale Part based on Bone Radius (Base Radius is approx 20)
+        const scale = Math.max(0.5, radius / 20);
+        this.ctx.scale(scale, scale);
+
         if (type === 'Fin') {
             this.ctx.fillStyle = bodyColor;
             if (this.settings.fxEnabled) {
@@ -1743,14 +1747,16 @@ class Lighting {
         this.settings = settings;
 
         // Offscreen canvas for lighting map
+        // Optimization: Low Resolution for Lighting (0.25x)
+        this.scale = 0.25;
         this.lightCanvas = document.createElement('canvas');
         this.lightCtx = this.lightCanvas.getContext('2d');
         this.resize(canvas.width, canvas.height);
     }
 
     resize(w, h) {
-        this.lightCanvas.width = w;
-        this.lightCanvas.height = h;
+        this.lightCanvas.width = Math.ceil(w * this.scale);
+        this.lightCanvas.height = Math.ceil(h * this.scale);
     }
 
     update(camera, entities) {
@@ -1760,19 +1766,22 @@ class Lighting {
         const h = this.lightCanvas.height;
 
         // 1. Fill with Ambient Darkness (Deep Abyss)
+        // Made lighter to reveal parallax background (#1a1a33 instead of #000818)
         this.lightCtx.globalCompositeOperation = 'source-over';
-        this.lightCtx.fillStyle = '#000818'; // Very dark blue base
+        this.lightCtx.fillStyle = '#1a1a33';
         this.lightCtx.fillRect(0, 0, w, h);
 
         // 2. Add Lights (Lighter Mode)
         this.lightCtx.globalCompositeOperation = 'lighter';
 
+        const s = this.scale; // Scale factor for coordinates
+
         // Player Light
         const pHead = entities.player.points[0];
         if (pHead) {
             const screenPos = camera.worldToScreen(pHead.x, pHead.y);
-            const radius = Math.max(10, pHead.radius * camera.zoom * 6); // Ensure visible
-            this.drawLight(screenPos.x, screenPos.y, radius, '#44ffff'); // Cyan glow
+            const radius = Math.max(10, pHead.radius * camera.zoom * 6);
+            this.drawLight(screenPos.x * s, screenPos.y * s, radius * s, '#44ffff');
         }
 
         // Enemies
@@ -1781,26 +1790,24 @@ class Lighting {
             const head = e.points[0];
             const screenPos = camera.worldToScreen(head.x, head.y);
 
-            // Optimization: Skip if off-screen
-            if (screenPos.x < -100 || screenPos.x > w + 100 || screenPos.y < -100 || screenPos.y > h + 100) return;
+            // Optimization: Skip if off-screen (Bounds check adjusted for scale)
+            if (screenPos.x < -100 || screenPos.x > this.canvas.width + 100 || screenPos.y < -100 || screenPos.y > this.canvas.height + 100) return;
 
             const radius = Math.max(10, head.radius * camera.zoom * 4);
-            this.drawLight(screenPos.x, screenPos.y, radius, e.color);
+            this.drawLight(screenPos.x * s, screenPos.y * s, radius * s, e.color);
         });
 
         // Food (Small lights)
         entities.food.forEach(f => {
             const screenPos = camera.worldToScreen(f.x, f.y);
-            // Optimization: Skip food
-            if (screenPos.x < -20 || screenPos.x > w + 20 || screenPos.y < -20 || screenPos.y > h + 20) return;
+            if (screenPos.x < -20 || screenPos.x > this.canvas.width + 20 || screenPos.y < -20 || screenPos.y > this.canvas.height + 20) return;
 
             const radius = Math.max(5, f.radius * camera.zoom * 3);
-            this.drawLight(screenPos.x, screenPos.y, radius, f.color);
+            this.drawLight(screenPos.x * s, screenPos.y * s, radius * s, f.color);
         });
     }
 
     drawLight(x, y, radius, color) {
-        // Create simple radial gradient
         const grad = this.lightCtx.createRadialGradient(x, y, 0, x, y, radius);
         grad.addColorStop(0, color);
         grad.addColorStop(1, 'rgba(0,0,0,0)');
@@ -1816,21 +1823,20 @@ class Lighting {
         const h = this.canvas.height;
 
         if (this.settings.fxEnabled) {
-            // Apply Dynamic Lighting (Multiply Blend Mode)
-            // This tints the game with the light map.
-            // Dark areas in light map become dark in game. Light areas reveal game color.
             mainCtx.save();
             mainCtx.globalCompositeOperation = 'multiply';
-            mainCtx.drawImage(this.lightCanvas, 0, 0);
+            // Scale up the low-res light map
+            mainCtx.imageSmoothingEnabled = true; // Smooth the low-res
+            mainCtx.drawImage(this.lightCanvas, 0, 0, w, h);
             mainCtx.restore();
         }
 
-        // Vignette (Always visible for atmosphere)
+        // Vignette (Atmosphere) - Reduced opacity to 0.5 to show depth
         mainCtx.save();
         mainCtx.globalCompositeOperation = 'source-over';
-        const grad = mainCtx.createRadialGradient(w/2, h/2, h*0.4, w/2, h/2, h*0.9);
+        const grad = mainCtx.createRadialGradient(w/2, h/2, h*0.4, w/2, h/2, h*1.0);
         grad.addColorStop(0, 'rgba(0,0,0,0)');
-        grad.addColorStop(1, 'rgba(0,0,0,0.85)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.5)');
 
         mainCtx.fillStyle = grad;
         mainCtx.fillRect(0, 0, w, h);
@@ -2044,45 +2050,40 @@ class Editor {
         this.active = false;
 
         // Editor State
-        this.selectedPart = null; // 'Fin', 'Spike', etc.
+        this.selectedPart = null;
         this.isDragging = false;
         this.dragX = 0;
         this.dragY = 0;
 
-        // Options
-        this.symmetry = false; // Mirror mode
+        this.symmetry = false;
 
-        // Setup UI immediately
         setTimeout(() => this.setupUI(), 100);
     }
 
     setupUI() {
-        // Toggle Overlay
         this.overlay = document.createElement('div');
         this.overlay.id = 'editor-overlay';
-        this.overlay.style.position = 'absolute';
-        this.overlay.style.top = '0';
-        this.overlay.style.left = '0';
-        this.overlay.style.width = '100%';
-        this.overlay.style.height = '100%';
-        this.overlay.style.display = 'none';
-        this.overlay.style.pointerEvents = 'none'; // Let clicks pass to canvas if needed
-        this.overlay.style.zIndex = '2000'; // Ensure above Ad Space
+        this.overlay.style = `position:absolute; top:0; left:0; width:100%; height:100%; display:none; pointer-events:none; z-index:2000; font-family:Orbitron;`;
 
-        // HTML Content with Classes
+        // Revised Layout for Mobile: Bottom Bar for Parts, Top Bar for Controls
         this.overlay.innerHTML = `
-            <div class="editor-controls">
-                <button id="add-vertebra-btn" class="btn-neon">+ BONE (10)</button>
-                <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem;">SYMMETRY: OFF</button>
-                <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; box-shadow:0 0 10px rgba(255,0,255,0.2);">PLAY</button>
+            <div style="position:absolute; top:0; left:0; width:100%; height:60px; background:rgba(0,0,0,0.8); display:flex; justify-content:space-between; align-items:center; padding:0 10px; box-sizing:border-box; pointer-events:auto; border-bottom:1px solid #333;">
+                <div style="color:#0ff; font-size:1.2rem; text-shadow:0 0 10px #0ff;">
+                    WORKBENCH <span id="editor-dna" style="font-size:0.7em; color:#fff; margin-left:10px;">DNA: 0</span>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button id="add-vertebra-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">+ BONE (10)</button>
+                    <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">SYM: OFF</button>
+                    <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; font-size:0.8rem; padding:5px 15px;">PLAY</button>
+                </div>
             </div>
 
-            <div class="editor-sidebar right" id="editor-parts-list" style="pointer-events: auto;">
+            <div id="editor-parts-list" style="position:absolute; bottom:0; left:0; width:100%; height:100px; background:rgba(0,0,0,0.9); display:flex; overflow-x:auto; align-items:center; gap:10px; padding:10px; box-sizing:border-box; pointer-events:auto; border-top:1px solid #333; white-space:nowrap;">
                 <!-- Populated Dynamically -->
             </div>
 
-            <div style="position:absolute; top:20px; left:20px; color:#0ff; font-family:'Orbitron'; font-size:1.5rem; text-shadow:0 0 10px #0ff;">
-                WORKBENCH <div id="editor-dna" style="font-size:0.8em; color:#fff; margin-top:5px;">DNA: 0</div>
+            <div style="position:absolute; top:70px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
+                DRAG PARTS TO BODY • TAP BONE TO RESIZE
             </div>
         `;
         document.body.appendChild(this.overlay);
@@ -2092,13 +2093,12 @@ class Editor {
         document.getElementById('add-vertebra-btn').addEventListener('click', () => this.addVertebra());
         document.getElementById('toggle-mirror-btn').addEventListener('click', () => this.toggleSymmetry());
 
-        // Global Drag Listeners (Window)
+        // Drag Listeners
         window.addEventListener('mousemove', (e) => this.onDrag(e));
         window.addEventListener('touchmove', (e) => this.onDrag(e), {passive: false});
         window.addEventListener('mouseup', (e) => this.endDrag(e));
         window.addEventListener('touchend', (e) => this.endDrag(e));
 
-        // Tap on canvas for selection (only when editor active)
         this.game.canvas.addEventListener('mousedown', (e) => this.onCanvasClick(e));
         this.game.canvas.addEventListener('touchstart', (e) => this.onCanvasClick(e), {passive: false});
     }
@@ -2111,13 +2111,22 @@ class Editor {
         unlocked.forEach(key => {
             const part = PARTS_DB[key];
             const div = document.createElement('div');
-            div.className = 'part-item';
-            div.dataset.type = key;
-            div.innerText = `${part.name} (${part.cost})`;
-            div.style.pointerEvents = 'auto'; // Ensure clickable
-            if (key === 'Eye') div.style.color = '#fff';
+            // Card Style
+            div.className = 'part-card';
+            div.style = `
+                min-width:80px; height:80px; border:1px solid #444; background:rgba(20,20,20,0.8);
+                display:flex; flex-direction:column; align-items:center; justify-content:center;
+                border-radius:5px; cursor:grab; user-select:none; color:#aaa; font-size:0.7rem;
+            `;
 
-            // Add Drag Listeners dynamically
+            div.innerHTML = `
+                <div style="font-size:1.5rem; margin-bottom:5px;">${key[0]}</div>
+                <div style="font-weight:bold; color:#fff;">${part.name}</div>
+                <div style="color:#0f0;">${part.cost}</div>
+            `;
+
+            if (key === 'Eye') div.style.borderColor = '#fff';
+
             div.addEventListener('mousedown', (e) => this.startDrag(e, key));
             div.addEventListener('touchstart', (e) => this.startDrag(e, key), {passive: false});
 
@@ -2132,24 +2141,66 @@ class Editor {
             if (active) {
                 this.updateDNA();
                 this.refreshParts();
+                this.fitCamera();
             } else {
                 this.hideResizeSlider();
+                this.game.camera.targetZoom = 1.0; // Reset zoom
             }
         }
 
         if (active) {
-            // Zoom Camera to Creature
-            this.game.camera.targetZoom = 2.5;
-            this.game.input.active = false; // Disable movement
-        } else {
-            this.game.camera.targetZoom = 1.0;
+            this.game.input.active = false;
         }
+    }
+
+    fitCamera() {
+        if (!this.game.creature || this.game.creature.points.length === 0) return;
+
+        // Calculate Bounding Box of Creature
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        this.game.creature.points.forEach(p => {
+            minX = Math.min(minX, p.x - p.radius);
+            maxX = Math.max(maxX, p.x + p.radius);
+            minY = Math.min(minY, p.y - p.radius);
+            maxY = Math.max(maxY, p.y + p.radius);
+        });
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+
+        // Add Padding
+        const padding = 200;
+        const desiredW = width + padding;
+        const desiredH = height + padding;
+
+        // Calculate Zoom
+        // Camera Zoom = Screen Dimension / World Dimension
+        const zoomX = this.game.width / desiredW;
+        const zoomY = (this.game.height - 160) / desiredH; // Subtract UI height (top+bottom bars)
+
+        let targetZoom = Math.min(zoomX, zoomY);
+        targetZoom = Math.min(targetZoom, 2.5); // Max Zoom cap
+        targetZoom = Math.max(targetZoom, 0.5); // Min Zoom cap
+
+        // Set Camera Target
+        // We need to snap camera immediately or smooth? Smooth is better.
+        this.game.camera.targetZoom = targetZoom;
+
+        // Center camera on creature center
+        // Camera normally follows head. In editor, we override update?
+        // Let's force camera position in update() when editor is active.
+        this.game.camera.x = centerX;
+        this.game.camera.y = centerY;
+        this.game.camera.vx = 0;
+        this.game.camera.vy = 0;
     }
 
     toggleSymmetry() {
         this.symmetry = !this.symmetry;
         const btn = document.getElementById('toggle-mirror-btn');
-        btn.innerText = `SYMMETRY: ${this.symmetry ? 'ON' : 'OFF'}`;
+        btn.innerText = `SYM: ${this.symmetry ? 'ON' : 'OFF'}`;
         btn.style.borderColor = this.symmetry ? '#0f0' : '#0ff';
         btn.style.color = this.symmetry ? '#0f0' : '#0ff';
     }
@@ -2166,38 +2217,32 @@ class Editor {
         if (this.game.creature.gameStats.dna < 10) return;
 
         const points = this.game.creature.points;
-        if (points.length >= 20) return;
+        if (points.length >= 30) return; // Increased limit
 
         this.game.creature.gameStats.dna -= 10;
         this.updateDNA();
 
         const last = points[points.length-1];
         const prev = points[points.length-2] || last;
-
-        // Calculate angle
         const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
 
-        // Create new Point
-        const newX = last.x + Math.cos(angle) * 20;
-        const newY = last.y + Math.sin(angle) * 20;
-
-        // Decrease radius slightly
-        const newRadius = Math.max(5, last.radius * 0.9);
+        const newRadius = Math.max(5, last.radius * 0.95);
+        const newX = last.x + Math.cos(angle) * (newRadius * 2); // Space out based on radius
+        const newY = last.y + Math.sin(angle) * (newRadius * 2);
 
         const newP = Physics.createPoint(newX, newY, newRadius, 1);
         newP.baseRadius = newRadius;
 
         points.push(newP);
 
-        // New Constraint
-        const newC = Physics.createConstraint(last, newP, 0.3, 15);
-        newC.baseLength = 15;
+        const newC = Physics.createConstraint(last, newP, 0.5, newRadius * 2); // Stiffer spine
+        newC.baseLength = newRadius * 2;
 
         this.game.creature.constraints.push(newC);
+        this.fitCamera();
     }
 
     startDrag(e, type) {
-        // e.preventDefault();
         this.isDragging = true;
         this.selectedPart = type;
         const pt = this.getEventPos(e);
@@ -2207,7 +2252,7 @@ class Editor {
 
     onDrag(e) {
         if (!this.isDragging) return;
-        // e.preventDefault();
+        // e.preventDefault(); // Prevent scroll on mobile? Yes.
         const pt = this.getEventPos(e);
         this.dragX = pt.x;
         this.dragY = pt.y;
@@ -2216,7 +2261,7 @@ class Editor {
     getClosestBone(pt) {
         const cam = this.game.camera;
         let closest = null;
-        let minDist = 60; // Increased snap radius for easier mobile use
+        let minDist = 80;
 
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
@@ -2234,20 +2279,15 @@ class Editor {
 
     calcSide(closest, dragX, dragY) {
         const bone = closest.point;
-        // Determine spine vector
         let spineVec = { x: 0, y: 0 };
 
-        // Use neighbors to determine "Forward" along spine
         if (closest.index === 0) {
-            // Head: Vector from next bone to head
             const next = this.game.creature.points[1];
             if (next) spineVec = { x: bone.x - next.x, y: bone.y - next.y };
         } else if (closest.index === this.game.creature.points.length - 1) {
-            // Tail: Vector from prev bone to tail
             const prev = this.game.creature.points[closest.index - 1];
             if (prev) spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
         } else {
-            // Body: Average of prev->bone and bone->next? Or just prev->next
             const prev = this.game.creature.points[closest.index - 1];
             const next = this.game.creature.points[closest.index + 1];
             if (prev && next) spineVec = { x: next.x - prev.x, y: next.y - prev.y };
@@ -2261,18 +2301,12 @@ class Editor {
         const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
         dropVec.x /= dropLen; dropVec.y /= dropLen;
 
-        // Dot Product
         const dot = spineVec.x * dropVec.x + spineVec.y * dropVec.y;
-        // Cross Product (2D)
         const cross = spineVec.x * dropVec.y - spineVec.y * dropVec.x;
 
-        // Logic:
-        // If Dot is high (> 0.7), we are "In Line" (Front/Back/Top) -> Side 0
-        // Else Left/Right
-
-        if (dot > 0.7) return 0; // Front/Center
-        if (cross > 0) return 1; // Left
-        return -1; // Right
+        if (dot > 0.7) return 0;
+        if (cross > 0) return 1;
+        return -1;
     }
 
     endDrag(e) {
@@ -2283,24 +2317,19 @@ class Editor {
 
         if (closest) {
             const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
-
-            // Check DNA cost (account for symmetry double cost?)
             let totalCost = cost;
             const side = this.calcSide(closest, this.dragX, this.dragY);
 
             if (this.symmetry && side !== 0) totalCost *= 2;
 
             if (this.game.creature.gameStats.dna < totalCost) {
-                // Feedback: Not enough DNA
                 alert("Not enough DNA!");
                 this.selectedPart = null;
                 return;
             }
 
-            // Add Part
             this.addPart(this.selectedPart, closest.index, side);
 
-            // Symmetry (Only if not center)
             if (this.symmetry && side !== 0) {
                 this.addPart(this.selectedPart, closest.index, -side);
             }
@@ -2309,7 +2338,6 @@ class Editor {
             this.updateDNA();
             this.game.creature.stats.calculate(this.game.creature.parts);
 
-            // Haptic
             if (navigator.vibrate) navigator.vibrate(50);
         }
 
@@ -2342,87 +2370,37 @@ class Editor {
         const pt = this.getEventPos(e);
         const cam = this.game.camera;
 
-        // 1. Check Part Selection (For Removal)
-        // Iterate parts backwards (topmost first)
-        const parts = this.game.creature.parts || [];
-        for (let i = parts.length - 1; i >= 0; i--) {
-            const part = parts[i];
-            const bone = this.game.creature.points[part.boneIndex];
-            if (!bone) continue;
-
-            // Approximate part position on screen
-            // We need to replicate rotation logic... simpler: check distance to bone + offset
-            // Part is roughly at Bone + Radius * SideVector
-            // Let's just check if click is near Bone Surface in the direction of side
-            // This is complex. Simplified: If click is near bone AND not bone center?
-            // Actually, let's just use distance to Bone Center.
-            // If click is within Bone Radius * 2, checks if it's hitting a part?
-
-            // Better: Just check distance to Bone. If we click a bone, we show a menu "Remove Part"?
-            // Or cycle parts?
-            // User requested "Click part to remove".
-            // Let's iterate parts and calculate their world pos.
-
-            let angle = 0; // Logic for angle
-            // ... (Replicating render logic is hard here without duplicating code)
-            // Simplified:
-            // Just assume part is at bone. If we click bone, maybe show a list of attached parts to remove?
-            // Or simpler: If we click a bone, and it has parts, remove the last one?
-            // No, that's annoying.
-
-            // Let's implement a "Sell Mode" toggle or just hold-to-delete?
-            // User: "Tap to remove".
-            // Let's check distance to bone. If < Radius, it's bone select.
-            // If > Radius but < Radius + 40 (Part range), check angle?
-        }
-
-        // Simple Implementation:
-        // If click hits a Bone, check if there are parts attached to it.
-        // If yes, remove the most recent part on that bone and refund.
-        // If no, select bone for resizing.
-
         let clickedBone = null;
         this.game.creature.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
             const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
-            if (dist < p.radius * cam.zoom * 2.5) { // Hitbox slightly larger for parts
+            if (dist < p.radius * cam.zoom * 2.5) {
                 clickedBone = { p, index, sp, dist: dist };
             }
         });
 
         if (clickedBone) {
-            // Check if we hit the bone center (Resize) or the edge (Part)
-            // Threshold: Radius * Zoom
             const radiusScreen = clickedBone.p.radius * cam.zoom;
 
             if (clickedBone.dist < radiusScreen * 0.8) {
-                // Center Hit -> Resize
                 this.selectedBone = clickedBone;
                 this.showResizeSlider(clickedBone);
             } else {
-                // Edge Hit -> Try Remove Part
-                // Find parts on this bone
+                // Remove Part Logic
+                const parts = this.game.creature.parts || [];
                 const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
                 if (boneParts.length > 0) {
-                    // Remove the last one
                     const toRemove = boneParts[boneParts.length - 1];
-                    // Refund
                     const cost = PARTS_DB[toRemove.type] ? PARTS_DB[toRemove.type].cost : 5;
-                    this.game.creature.gameStats.dna += Math.floor(cost * 0.5); // 50% refund
+                    this.game.creature.gameStats.dna += Math.floor(cost * 0.5);
 
-                    // Remove from main list
                     const idx = parts.indexOf(toRemove);
                     if (idx > -1) parts.splice(idx, 1);
 
                     this.updateDNA();
                     this.game.creature.stats.calculate(this.game.creature.parts);
-
-                    // Feedback
                     if (navigator.vibrate) navigator.vibrate(20);
-                    // Show floating text? (Maybe later)
-                    alert(`Sold ${toRemove.type} for ${Math.floor(cost*0.5)} DNA`);
                 } else {
-                    // No parts, select bone
                     this.selectedBone = clickedBone;
                     this.showResizeSlider(clickedBone);
                 }
@@ -2438,8 +2416,7 @@ class Editor {
         if (!slider) {
             slider = document.createElement('div');
             slider.id = 'resize-slider-container';
-            slider.className = 'glass-panel';
-            slider.style = `position:absolute; width:150px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:5px; pointer-events:auto; z-index:2001;`;
+            slider.style = `position:absolute; width:150px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:5px; pointer-events:auto; z-index:2001; background:rgba(0,0,0,0.8); border:1px solid #0ff; border-radius:10px;`;
             slider.innerHTML = `
                 <div style="font-size:0.8rem; color:#fff;">SCALE</div>
                 <input type="range" id="bone-scale" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
@@ -2450,20 +2427,16 @@ class Editor {
                 if (this.selectedBone) {
                     const scale = parseFloat(e.target.value);
                     if (!this.selectedBone.p.initialBaseRadius) this.selectedBone.p.initialBaseRadius = this.selectedBone.p.baseRadius;
-
-                    // Logic fixed: Slider left (0.5) -> Smaller. Right (1.5) -> Bigger.
                     this.selectedBone.p.baseRadius = this.selectedBone.p.initialBaseRadius * scale;
                     this.selectedBone.p.scaleFactor = scale;
                 }
             });
         }
 
-        // Position Slider near bone
         slider.style.display = 'flex';
-        slider.style.left = `${selection.sp.x + 50}px`;
-        slider.style.top = `${selection.sp.y - 50}px`;
+        slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x - 75)}px`; // Clamp to screen
+        slider.style.top = `${selection.sp.y - 80}px`;
 
-        // Set value
         const currentScale = selection.p.scaleFactor || 1.0;
         document.getElementById('bone-scale').value = currentScale;
     }
@@ -2476,17 +2449,26 @@ class Editor {
     render(ctx) {
         if (!this.active) return;
 
-        // Highlight Selected Bone
+        if (this.game.creature.points.length > 0) {
+             // Keep camera centered if not dragging (or even if dragging?)
+             // Actually, let's just gently nudge it towards center
+             // fitCamera sets absolute position, maybe we just call fitCamera every frame?
+             // No, that prevents panning.
+             // But we disabled input.active, so player can't move.
+             // So camera is static unless we move it.
+             // Let's call fitCamera once on toggle, then maybe allow pan?
+             // For now, static is fine.
+        }
+
         if (this.selectedBone) {
             const cam = this.game.camera;
             const p = this.selectedBone.p;
             const sp = cam.worldToScreen(p.x, p.y);
 
-            // Update slider pos
             const slider = document.getElementById('resize-slider-container');
             if(slider && slider.style.display !== 'none') {
-                 slider.style.left = `${sp.x + 40}px`;
-                 slider.style.top = `${sp.y - 40}px`;
+                 slider.style.left = `${Math.min(window.innerWidth - 160, sp.x - 75)}px`;
+                 slider.style.top = `${sp.y - 80}px`;
             }
 
             ctx.save();
@@ -2498,27 +2480,20 @@ class Editor {
             ctx.restore();
         }
 
-        // Drag Logic
         if (this.isDragging && this.selectedPart) {
-            // Magnet Preview logic
             const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
 
             if (closest) {
-                // Draw Ghost Part
                 const bone = closest.point;
                 const prev = this.game.creature.points[closest.index - 1] || this.game.creature.points[closest.index + 1];
                 let spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
                 if (closest.index === 0) spineVec = { x: prev.x - bone.x, y: prev.y - bone.y };
 
-                // Determine Side
                 const side = this.calcSide(closest, this.dragX, this.dragY);
-
-                // Calculate Angle
                 const spineAngle = Math.atan2(spineVec.y, spineVec.x) + (closest.index===0 ? Math.PI : 0);
 
-                // Render Ghost
                 ctx.save();
-                ctx.globalAlpha = 0.5; // Ghostly
+                ctx.globalAlpha = 0.5;
                 const sp = closest.sp;
 
                 ctx.translate(sp.x, sp.y);
@@ -2528,31 +2503,25 @@ class Editor {
                 else if (side === -1) sideAngle = -Math.PI/2;
 
                 ctx.rotate(spineAngle + sideAngle);
-                ctx.translate(bone.radius * this.game.camera.zoom, 0); // Offset by radius scaled
 
+                // Use same scale logic as Renderer
+                const scale = Math.max(0.5, bone.radius / 20); // Estimation
+
+                ctx.translate(bone.radius * this.game.camera.zoom, 0);
+
+                // Draw Preview Dot
                 ctx.fillStyle = '#0ff';
                 if(this.selectedPart === 'Spike') ctx.fillStyle = '#f00';
-                if(side === 0) ctx.fillStyle = '#ff0'; // Highlight center placement
+                if(side === 0) ctx.fillStyle = '#ff0';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, 10, 0, Math.PI*2); // Simple dot preview
+                ctx.arc(0, 0, 10 * scale, 0, Math.PI*2);
                 ctx.fill();
-
-                // Draw Symmetry Ghost (Only if not center)
-                if (this.symmetry && side !== 0) {
-                    ctx.save();
-                    ctx.translate(0, 0); // Reset local
-                    // It's hard to inverse exact transform here without full logic.
-                    // Simplified: just draw a dot on the other side?
-                    // Let's just stick to single ghost for now to avoid complexity bugs.
-                    ctx.restore();
-                }
 
                 ctx.restore();
                 ctx.globalAlpha = 1.0;
             }
 
-            // Draw Icon under finger
             ctx.save();
             ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
             ctx.shadowColor = '#0ff';
@@ -2565,7 +2534,7 @@ class Editor {
             ctx.font = '12px Orbitron';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(this.selectedPart.toUpperCase(), this.dragX, this.dragY);
+            ctx.fillText(this.selectedPart[0], this.dragX, this.dragY);
             ctx.restore();
         }
     }
@@ -2880,106 +2849,206 @@ class Sonar {
     constructor(game) {
         this.game = game;
         this.pulses = []; // {x, y, radius, maxRadius, life}
-        this.timer = 0;
-        this.pingInterval = 2.0; // Auto ping every 2s
-        this.color = '#00ffff';
+        this.detectedTargets = []; // {x, y, type, life}
+
+        this.cooldown = 0;
+        this.maxCooldown = 5.0;
+        this.rangeMultiplier = 3.0; // How far relative to screen
+    }
+
+    activate() {
+        if (this.cooldown > 0) return false;
+
+        this.cooldown = this.maxCooldown;
+        const head = this.game.creature.points[0];
+
+        // Dynamic Range based on Creature Size + Screen Size
+        // Should go "Very Far".
+        // Let's say 3x the diagonal of the screen in world units?
+        // Or fixed large distance?
+        // Infinite map, so relative to zoom is better.
+        const zoom = this.game.camera.zoom;
+        const screenDiag = Math.hypot(this.game.width, this.game.height);
+        const worldDiag = screenDiag / zoom;
+
+        const maxRadius = worldDiag * 2.0;
+
+        this.ping(head.x, head.y, maxRadius);
+
+        // Haptic
+        if(navigator.vibrate) navigator.vibrate([50, 50, 100]);
+        // Audio
+        if(this.game.settings.audioEnabled) this.game.audio.playTone(800, 'sine', 1.0);
+
+        return true;
+    }
+
+    ping(x, y, maxRadius) {
+        this.pulses.push({
+            x: x, y: y,
+            radius: 10,
+            maxRadius: maxRadius,
+            life: 3.0, // Duration of expansion
+            checked: false // Optimization flag? No, check continuously
+        });
     }
 
     update(dt) {
-        // Auto Ping from player head
-        this.timer -= dt;
-        if (this.timer <= 0) {
-            this.timer = this.pingInterval;
-            const head = this.game.creature.points[0];
-            this.ping(head.x, head.y);
-        }
+        if (this.cooldown > 0) this.cooldown -= dt;
 
         // Update Pulses
         for (let i = this.pulses.length - 1; i >= 0; i--) {
             const p = this.pulses[i];
             p.life -= dt;
-            p.radius += dt * 500; // Speed of sound
+
+            // Expansion Speed: Reach maxRadius in 2 seconds?
+            const speed = p.maxRadius / 2.0;
+            p.radius += dt * speed;
+
             if (p.life <= 0 || p.radius > p.maxRadius) {
                 this.pulses.splice(i, 1);
+            } else {
+                this.scan(p);
             }
+        }
+
+        // Update Detected Targets (Fade out indicators)
+        for (let i = this.detectedTargets.length - 1; i >= 0; i--) {
+            const t = this.detectedTargets[i];
+            t.life -= dt;
+            if (t.life <= 0) this.detectedTargets.splice(i, 1);
         }
     }
 
-    ping(x, y) {
-        this.pulses.push({
-            x: x, y: y,
-            radius: 10,
-            maxRadius: 1000,
-            life: 2.0
+    scan(pulse) {
+        // Check for new targets crossing the pulse ring
+        // Thickness of scan
+        const thickness = 100;
+        const innerR = pulse.radius - thickness;
+        const outerR = pulse.radius;
+
+        // Scan Enemies
+        this.game.enemies.forEach(e => {
+            if (e.scanned) return; // Custom flag on enemy to avoid double scan per ping?
+            // Actually, just check if already in detectedTargets?
+            // Better: reset 'scanned' flag on enemies when ping starts? Too complex.
+            // Just add to detectedTargets if not already there with high life.
+
+            const head = e.points[0];
+            const dist = Math.hypot(head.x - pulse.x, head.y - pulse.y);
+
+            if (dist >= innerR && dist <= outerR) {
+                // Found!
+                this.addTarget(head.x, head.y, e.bossType ? 'boss' : 'enemy');
+            }
         });
-        if(this.game.settings.audioEnabled) {
-            // Very quiet ping
-            // this.game.audio.playTone(800, 'sine', 0.1);
+
+        // Scan Food (Meat/Rare)
+        this.game.food.forEach(f => {
+            if (f.type !== 'meat') return; // Only meat is worth scanning? Or large food?
+            const dist = Math.hypot(f.x - pulse.x, f.y - pulse.y);
+             if (dist >= innerR && dist <= outerR) {
+                this.addTarget(f.x, f.y, 'food');
+            }
+        });
+    }
+
+    addTarget(x, y, type) {
+        // Avoid duplicates close to each other
+        const existing = this.detectedTargets.find(t => Math.hypot(t.x - x, t.y - y) < 100 && t.type === type);
+        if (existing) {
+            existing.life = 3.0; // Refresh
+            existing.x = x; existing.y = y; // Update pos
+            return;
         }
+
+        this.detectedTargets.push({
+            x: x, y: y,
+            type: type,
+            life: 3.0 // Show indicator for 3 seconds
+        });
     }
 
     render(ctx, camera) {
-        if (!this.game.settings.fxEnabled) return;
+        if (!this.game.settings.fxEnabled && this.pulses.length === 0 && this.detectedTargets.length === 0) return;
 
         ctx.save();
+
+        // 1. Draw Pulses (World Space)
         ctx.translate(ctx.canvas.width/2, ctx.canvas.height/2);
         ctx.scale(camera.zoom, camera.zoom);
         ctx.translate(-camera.x, -camera.y);
 
         this.pulses.forEach(p => {
-            // Draw Pulse Ring
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(0, 255, 255, ${p.life * 0.3})`;
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = `rgba(0, 255, 255, ${p.life / 3})`; // Fade out
+            ctx.lineWidth = 5 + (p.radius / 500); // Thicker as it grows
             ctx.stroke();
+        });
 
-            // Check intersections with enemies/food to draw "Blips"
-            // This is the "Radar" part.
-            // Only draw blips if the pulse wave is close to the object?
-            // Or just highlight objects inside the pulse?
-
-            // "Scan Line" effect: If object distance is roughly equal to pulse radius.
-
-            const thickness = 50;
-
-            // Enemies
-            this.game.enemies.forEach(e => {
-                const eHead = e.points[0];
-                const dist = Math.hypot(eHead.x - p.x, eHead.y - p.y);
-                if (Math.abs(dist - p.radius) < thickness) {
-                    // Draw Blip
-                    ctx.fillStyle = e.bossType ? '#ff0000' : '#ff00ff';
-                    ctx.beginPath();
-                    ctx.arc(eHead.x, eHead.y, eHead.radius * 2, 0, Math.PI*2);
-                    ctx.fill();
-
-                    // Draw connection line
-                    ctx.beginPath();
-                    ctx.moveTo(eHead.x, eHead.y);
-                    ctx.lineTo(p.x + (eHead.x - p.x) * (p.radius/dist), p.y + (eHead.y - p.y) * (p.radius/dist));
-                    ctx.strokeStyle = `rgba(255, 0, 255, 0.5)`;
-                    ctx.stroke();
-                }
-            });
-
-            // Food (only rare food/meat?)
-            // Too much visual noise if we ping every food.
-            // Let's ping Meat or large clusters.
-            this.game.food.forEach(f => {
-                if (f.type === 'meat') {
-                    const dist = Math.hypot(f.x - p.x, f.y - p.y);
-                    if (Math.abs(dist - p.radius) < thickness) {
-                        ctx.fillStyle = '#ffaa00';
-                        ctx.beginPath();
-                        ctx.arc(f.x, f.y, f.radius * 2, 0, Math.PI*2);
-                        ctx.fill();
-                    }
-                }
-            });
+        // 2. Draw Detected Targets (Blips)
+        // These are drawn at their world position
+        this.detectedTargets.forEach(t => {
+            ctx.fillStyle = t.type === 'boss' ? '#f00' : (t.type === 'food' ? '#fa0' : '#f0f');
+            ctx.globalAlpha = t.life / 3.0;
+            ctx.beginPath();
+            ctx.arc(t.x, t.y, 20 / camera.zoom, 0, Math.PI*2); // Constant screen size
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
         });
 
         ctx.restore();
+
+        // 3. Draw Directional Indicators (Screen Space)
+        // For targets that are OFF SCREEN.
+        this.detectedTargets.forEach(t => {
+            const screenPos = camera.worldToScreen(t.x, t.y);
+            const pad = 50;
+            const w = ctx.canvas.width;
+            const h = ctx.canvas.height;
+
+            // Check if offscreen
+            if (screenPos.x < 0 || screenPos.x > w || screenPos.y < 0 || screenPos.y > h) {
+                // Calculate direction vector from center
+                const cx = w/2;
+                const cy = h/2;
+                const dx = screenPos.x - cx;
+                const dy = screenPos.y - cy;
+                const angle = Math.atan2(dy, dx);
+
+                // Clamp to screen edge
+                // Simple box clamping
+                // x = cx + t * dx, y = cy + t * dy
+                // find t such that x is 0 or w, or y is 0 or h
+
+                // Better: Just put it on a circle of radius min(w,h)/2 - pad
+                const radius = Math.min(w, h)/2 - pad;
+                const arrowX = cx + Math.cos(angle) * radius;
+                const arrowY = cy + Math.sin(angle) * radius;
+
+                // Draw Arrow
+                ctx.save();
+                ctx.translate(arrowX, arrowY);
+                ctx.rotate(angle);
+                ctx.fillStyle = t.type === 'boss' ? '#f00' : (t.type === 'food' ? '#fa0' : '#f0f');
+                ctx.globalAlpha = t.life / 3.0;
+
+                ctx.beginPath();
+                ctx.moveTo(10, 0);
+                ctx.lineTo(-10, 10);
+                ctx.lineTo(-10, -10);
+                ctx.fill();
+
+                // Icon
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(t.type === 'boss' ? '!' : (t.type === 'food' ? 'Meat' : ''), -20, 0);
+
+                ctx.restore();
+            }
+        });
     }
 }
 
@@ -3154,6 +3223,7 @@ class GameLoop {
         hud.style = `position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:90;`;
         hud.innerHTML = `
             <button id="pause-trigger-btn" style="position:absolute; top:20px; left:20px; pointer-events:auto; background:rgba(0,0,0,0.5); border:1px solid #0ff; color:#0ff; border-radius:50%; width:40px; height:40px; font-weight:bold; cursor:pointer;">II</button>
+            <button id="sonar-btn" style="position:absolute; bottom:80px; right:20px; pointer-events:auto; background:rgba(0,0,0,0.5); border:2px solid #0ff; color:#0ff; border-radius:50%; width:60px; height:60px; font-weight:bold; cursor:pointer; box-shadow:0 0 10px #0ff; display:flex; justify-content:center; align-items:center; font-size:24px;">((•))</button>
             <button id="evolve-btn" style="display:none; position:absolute; top:20px; right:20px; pointer-events:auto; padding:10px 20px; background:linear-gradient(45deg, #f0f, #00f); border:none; border-radius:20px; font-family:Orbitron; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 10px #f0f;">EVOLVE (10 DNA)</button>
         `;
         document.body.appendChild(hud);
@@ -3204,6 +3274,13 @@ class GameLoop {
         };
         document.getElementById('pause-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('pause-audio-btn').onclick = () => this.toggleAudio();
+        document.getElementById('sonar-btn').onclick = () => {
+             if(this.sonar.activate()) {
+                 const btn = document.getElementById('sonar-btn');
+                 btn.style.opacity = 0.5;
+                 setTimeout(() => btn.style.opacity = 1.0, 5000);
+             }
+        };
 
         // Unlock Card Click to continue
         document.getElementById('unlock-overlay').onclick = () => {
@@ -3417,10 +3494,15 @@ Ancestral DNA Gained: ${earned}`);
     }
 
     spawnFood(count) {
+        const head = this.creature.points[0];
+        const center = head ? {x: head.x, y: head.y} : {x:0, y:0};
+
         for(let i=0; i<count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 500 + Math.random() * 2000;
             this.food.push({
-                x: (Math.random()-0.5)*3000,
-                y: (Math.random()-0.5)*3000,
+                x: center.x + Math.cos(angle) * dist,
+                y: center.y + Math.sin(angle) * dist,
                 radius: 5,
                 color: '#0f0'
             });
@@ -3481,7 +3563,14 @@ Ancestral DNA Gained: ${earned}`);
         const currentBiome = this.biomeManager.getCurrentBiome(playerX, playerY);
 
         const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
-        const spawnDist = 1000 * Math.max(1, playerScale * 0.5) + 500;
+
+        // Ensure spawn distance is less than despawn distance (3000) but far enough to be offscreen
+        // Despawn is 3000. Let's spawn at 1500-2500.
+        // Scale distance slightly with player size, but cap it.
+        const minSpawn = 1200;
+        const maxSpawn = 2500;
+        const spawnDist = minSpawn + Math.random() * (maxSpawn - minSpawn);
+
         const angle = Math.random() * Math.PI * 2;
         const ex = playerX + Math.cos(angle) * spawnDist;
         const ey = playerY + Math.sin(angle) * spawnDist;
@@ -3697,9 +3786,13 @@ Ancestral DNA Gained: ${earned}`);
             if (e.bossType && e.health <= 0) this.bossActive = false;
         }
 
+        // Maintenance: Remove far food and spawn new food
+        // Remove food > 3000 away
         for (let i = this.food.length - 1; i >= 0; i--) {
             const f = this.food[i];
             const dist = Math.hypot(head.x - f.x, head.y - f.y);
+
+            // Eat Logic
             if (dist < head.radius + f.radius) {
                 this.food.splice(i, 1);
                 const dnaValue = f.dnaValue || 1;
@@ -3707,14 +3800,33 @@ Ancestral DNA Gained: ${earned}`);
                 this.creature.gameStats.mass += 0.5 * dnaValue;
                 this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
 
-                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera); // Spatial
-                if(navigator.vibrate) navigator.vibrate(20); // Light haptic
+                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera);
+                if(navigator.vibrate) navigator.vibrate(20);
 
                 this.spawnParticles(f.x, f.y, f.color, 5, 100);
+
+                // Immediately spawn replacement nearby to maintain density
                 if (f.type !== 'meat') {
-                     this.food.push({ x: head.x + (Math.random()-0.5)*1000, y: head.y + (Math.random()-0.5)*1000, radius: 5, color: '#0f0' });
+                    const angle = Math.random() * Math.PI * 2;
+                    const d = 500 + Math.random() * 1000;
+                    this.food.push({
+                        x: head.x + Math.cos(angle) * d,
+                        y: head.y + Math.sin(angle) * d,
+                        radius: 5, color: '#0f0'
+                    });
                 }
+                continue;
             }
+
+            // Cleanup Logic
+            if (dist > 3000) {
+                this.food.splice(i, 1);
+            }
+        }
+
+        // Maintain Minimum Food Count in World
+        if (this.food.length < 50) {
+            this.spawnFood(10);
         }
 
         if (this.creature.gameStats.dna >= 10 && !this.editor.active) {
