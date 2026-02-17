@@ -953,6 +953,46 @@ class GameLoop {
         }
     }
 
+    drawHUD() {
+        const dna = Math.floor(this.creature.gameStats.dna);
+        const x = this.width / 2;
+        const y = 40;
+
+        this.ctx.save();
+        this.ctx.translate(x, y);
+
+        // Jelly Background
+        const time = Date.now() * 0.002;
+        this.ctx.fillStyle = 'rgba(0, 255, 255, 0.2)';
+        this.ctx.strokeStyle = '#0ff';
+        this.ctx.lineWidth = 2;
+
+        this.ctx.beginPath();
+        // Draw a wobbly oval
+        for (let i = 0; i <= Math.PI * 2; i += 0.1) {
+            const r = 30 + Math.sin(i * 5 + time) * 2 + Math.cos(i * 3 - time) * 2;
+            const px = Math.cos(i) * r * 1.5; // Wider
+            const py = Math.sin(i) * r;
+            if (i === 0) this.ctx.moveTo(px, py);
+            else this.ctx.lineTo(px, py);
+        }
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // DNA Icon/Text
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = 'bold 20px Orbitron, sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.shadowColor = '#0ff';
+        this.ctx.shadowBlur = 10;
+        this.ctx.fillText(`DNA: ${dna}`, 0, 0);
+        this.ctx.shadowBlur = 0;
+
+        this.ctx.restore();
+    }
+
     render() {
         if (this.editor.active) {
             // Petri Dish Render Mode (Exclusive)
@@ -1067,6 +1107,8 @@ class GameLoop {
         this.lighting.render(this.ctx);
         this.distortion.render(this.ctx, this.camera);
         this.sonar.render(this.ctx, this.camera);
+
+        if (this.gameState === 'playing') this.drawHUD();
 
         if (this.input.active && !this.editor.active && this.gameState === 'playing') {
             this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
