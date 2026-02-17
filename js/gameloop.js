@@ -22,12 +22,6 @@ import Boss from './boss.js';
 import Sonar from './sonar.js';
 import Ally from './ally.js';
 
-import StateMachine from './state_machine.js';
-import MenuState from './states/menu_state.js';
-import PlayState from './states/play_state.js';
-import GameOverState from './states/gameover_state.js';
-import IntroState from './states/intro.js';
-
 class GameLoop {
     constructor() {
         this.running = false;
@@ -84,14 +78,7 @@ class GameLoop {
         this.particles = [];
         this.hitstop = 0;
         this.bossActive = false;
-        this.mate = null;
-
-        // State Machine
-        this.stateMachine = new StateMachine(this);
-        this.stateMachine.add('menu', new MenuState(this));
-        this.stateMachine.add('playing', new PlayState(this));
-        this.stateMachine.add('gameover', new GameOverState(this));
-        this.stateMachine.add('intro', new IntroState(this));
+        this.gameState = 'menu'; // menu, playing, gameover, paused
 
         // UI Layers
         this.createUI();
@@ -109,11 +96,10 @@ class GameLoop {
         // Main Menu
         const menu = document.createElement('div');
         menu.id = 'main-menu';
-        menu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:100; flex-direction:column; justify-content:center; align-items:center;';
         menu.innerHTML = `
             <h1>NEON ABYSS</h1>
             <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
-                <button id="play-btn" class="btn-neon">Start Journey</button>
+                <button id="play-btn" class="btn-neon">EVOLVE</button>
                 <button id="legacy-btn" class="btn-neon" style="border-color:#f0f; color:#f0f;">ANCESTRAL MEMORY</button>
                 <button id="settings-btn" class="btn-neon" style="font-size:1rem; border-color:#888; color:#888;">SETTINGS</button>
             </div>
@@ -192,7 +178,7 @@ class GameLoop {
     }
 
     setupEventListeners() {
-        document.getElementById('play-btn').onclick = () => this.startIntro();
+        document.getElementById('play-btn').onclick = () => this.startGame();
         document.getElementById('settings-btn').onclick = () => {
             document.getElementById('main-menu').style.display = 'none';
             document.getElementById('settings-menu').style.display = 'flex';
@@ -230,7 +216,7 @@ class GameLoop {
             document.getElementById('pause-menu').style.display = 'none';
             document.getElementById('main-menu').style.display = 'flex';
             document.getElementById('game-hud').style.display = 'none';
-            this.stateMachine.change('menu');
+            this.gameState = 'menu';
         };
         document.getElementById('pause-fx-btn').onclick = () => this.toggleFX();
         document.getElementById('pause-audio-btn').onclick = () => this.toggleAudio();
@@ -274,10 +260,12 @@ class GameLoop {
 
     toggleFX() {
         if (!this.settings.fxEnabled) {
+             // Turning ON -> Show Warning
              if(confirm("WARNING: High Performance Required.\nEnable advanced visual effects? (Battery Drain / Lag possible)")) {
                  this.settings.toggleFX();
              }
         } else {
+             // Turning OFF
              this.settings.toggleFX();
         }
         this.updateSettingsButtons();
@@ -360,8 +348,8 @@ class GameLoop {
     }
 
     pauseGame(isUnlock = false) {
-        if (this.stateMachine.currentState instanceof PlayState) {
-            this.stateMachine.currentState.paused = true;
+        if (this.gameState === 'playing') {
+            this.gameState = 'paused';
             if (!isUnlock) {
                 document.getElementById('pause-menu').style.display = 'flex';
                 this.updateSettingsButtons();
@@ -370,19 +358,17 @@ class GameLoop {
     }
 
     resumeGame() {
-        if (this.stateMachine.currentState instanceof PlayState) {
-            this.stateMachine.currentState.paused = false;
+        if (this.gameState === 'paused') {
+            this.gameState = 'playing';
             document.getElementById('pause-menu').style.display = 'none';
         }
     }
 
-    startIntro() {
-        this.stateMachine.change('intro');
-        if (this.settings.audioEnabled) this.audio.ctx.resume();
-    }
-
     startGame() {
-        this.stateMachine.change('playing', { load: true });
+        document.getElementById('main-menu').style.display = 'none';
+        document.getElementById('game-hud').style.display = 'block';
+        this.gameState = 'playing';
+        if (this.settings.audioEnabled) this.audio.ctx.resume();
     }
 
     init() {
@@ -394,13 +380,9 @@ class GameLoop {
         this.spawnEnemies();
         this.spawnFood(50);
         document.getElementById('game-hud').style.display = 'none';
-
-        // Start in Menu
-        this.stateMachine.change('menu');
         this.start();
-
         setInterval(() => {
-            if (this.stateMachine.currentState instanceof PlayState) this.saveManager.save();
+            if (this.gameState === 'playing') this.saveManager.save();
         }, 30000);
     }
 
@@ -410,9 +392,11 @@ class GameLoop {
         this.creature.gameStats = this.creature.gameStats || { dna: 0, mass: 10, health: 100, maxHealth: 100 };
         this.headAngle = 0;
 
-        const spineLength = 3;
+        const spineLength = 3; // Reduced from 12 for starter balance
         const startX = 0;
         const startY = 0;
+
+        // Head, Body, Tail sizes
         const sizes = [25, 20, 15];
 
         for (let i = 0; i < spineLength; i++) {
@@ -434,39 +418,26 @@ class GameLoop {
     }
 
     respawn() {
-        // RESPAWN NOW LOADS LAST CHECKPOINT
-        if (this.saveManager.load()) {
-            this.creature.gameStats.health = this.creature.gameStats.maxHealth;
-            // Maybe apply some penalty? Or just simple checkpoint reload
-            document.getElementById('game-over').style.display = 'none';
-            this.stateMachine.change('playing');
-        } else {
-            // Full Reset if no save
-            const earned = this.legacyManager.convertMassToLegacy(this.creature.gameStats.mass);
-            alert(`Extinction Event.\nAncestral DNA Gained: ${earned}`);
-            document.getElementById('game-over').style.display = 'none';
-            this.resetCreature();
-            this.saveManager.reset(); // Clear corrupt/bad save?
-            this.stateMachine.change('menu');
-        }
-    }
+        // Convert Mass to Legacy DNA before reset
+        const earned = this.legacyManager.convertMassToLegacy(this.creature.gameStats.mass);
+        alert(`Extinction Event.\nAncestral DNA Gained: ${earned}`);
 
-    spawnMate() {
-        const head = this.creature.points[0];
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 800;
-        const x = head.x + Math.cos(angle) * dist;
-        const y = head.y + Math.sin(angle) * dist;
+        document.getElementById('game-over').style.display = 'none';
+        this.creature.gameStats.health = this.creature.gameStats.maxHealth;
 
-        const mate = new Enemy(x, y, 10, this.physics, 'hunter');
-        mate.type = 'mate';
-        mate.color = '#ff69b4';
-        mate.behavior = 'idle'; // Just floats
-        // Remove parts for simple look
-        mate.parts = [];
-        // Or give it some default parts?
+        // Apply Start Size Legacy
+        const buffs = this.legacyManager.getBuffs();
+        this.creature.gameStats.mass = 10 + buffs.startMass;
 
-        this.mate = mate;
+        this.saveManager.save();
+        this.resetCreature();
+        this.camera.x = 0;
+        this.camera.y = 0;
+        this.gameState = 'menu'; // Go to menu to spend points? Or playing?
+        // User flow: Death -> Rebirth Button -> Playing.
+        // Let's go to menu to allow upgrades.
+        document.getElementById('main-menu').style.display = 'flex';
+        document.getElementById('game-hud').style.display = 'none';
     }
 
     resize() {
@@ -510,11 +481,17 @@ class GameLoop {
     }
 
     spawnAlly(data, x, y) {
+        // Remove existing ally (Single Ally policy)
         this.allies = [];
+
+        // Add random offset to prevent physics NaN (dist=0) if spawned exactly on player
         const offsetX = (Math.random() - 0.5) * 50;
         const offsetY = (Math.random() - 0.5) * 50;
+
         const ally = new Ally(data, x + offsetX, y + offsetY, this.physics);
         this.allies.push(ally);
+
+        // Visual Effect
         this.spawnParticles(x, y, '#00ffff', 20, 300);
         if(this.settings.audioEnabled) this.audio.playTone(600, 'sine', 1.0);
     }
@@ -522,17 +499,22 @@ class GameLoop {
     spawnRival(code) {
         const data = Social.importCreature(code);
         if (!data) { alert("Invalid DNA"); return; }
+
+        // Spawn Rival as a powerful Titan-like enemy
         const head = this.creature.points[0];
         const dist = 1000;
         const angle = Math.random() * Math.PI * 2;
         const x = head.x + Math.cos(angle) * dist;
         const y = head.y + Math.sin(angle) * dist;
+
         const rival = new Enemy(x, y, 10, this.physics, 'titan');
-        rival.parts = data.parts;
+        rival.parts = data.parts; // Override parts
         rival.color = data.color;
+        // Recalculate rival stats based on imported parts
         rival.stats.calculate(rival.parts);
-        rival.health = 500; rival.maxHealth = 500;
+        rival.health = 500; rival.maxHealth = 500; // Boss health
         rival.active = true;
+
         this.enemies.push(rival);
         alert("RIVAL DETECTED: A new apex predator has entered the ecosystem.");
     }
@@ -545,25 +527,29 @@ class GameLoop {
         const playerX = this.creature.points[0] ? this.creature.points[0].x : 0;
         const playerY = this.creature.points[0] ? this.creature.points[0].y : 0;
 
+        // Boss Spawn Chance (Rare, Mass > 2000)
         if (this.creature.gameStats.mass > 2000 && !this.bossActive && Math.random() < 0.0005) {
              this.spawnBoss('Leviathan');
              return;
         }
 
+        // Use Biome Manager for difficulty/types
         const currentBiome = this.biomeManager.getCurrentBiome(playerX, playerY);
+
         const difficulty = Math.max(1, playerScale + (Math.random()-0.5)*2);
 
-        // Dynamic Spawn Distance based on Size
-        const baseDist = 1200;
-        const scaleDist = baseDist * playerScale;
-        const minSpawn = scaleDist;
-        const maxSpawn = scaleDist * 2;
-
+        // Ensure spawn distance is less than despawn distance (3000) but far enough to be offscreen
+        // Despawn is 3000. Let's spawn at 1500-2500.
+        // Scale distance slightly with player size, but cap it.
+        const minSpawn = 1200;
+        const maxSpawn = 2500;
         const spawnDist = minSpawn + Math.random() * (maxSpawn - minSpawn);
 
         const angle = Math.random() * Math.PI * 2;
         const ex = playerX + Math.cos(angle) * spawnDist;
         const ey = playerY + Math.sin(angle) * spawnDist;
+
+        // Pick type based on Biome
         const type = currentBiome.enemyTypes[Math.floor(Math.random() * currentBiome.enemyTypes.length)];
 
         if (type === 'titan') {
@@ -583,11 +569,16 @@ class GameLoop {
         const dist = 1500;
         const x = head.x + Math.cos(angle) * dist;
         const y = head.y + Math.sin(angle) * dist;
+
         const boss = new Boss(x, y, type, this.physics, this);
         this.enemies.push(boss);
         this.bossActive = true;
+
+        // Announce
         this.distortion.addShockwave(head.x, head.y);
         if(this.settings.audioEnabled) this.audio.playTone(50, 'sawtooth', 3.0);
+
+        // UI Warning
         const warning = document.createElement('div');
         warning.style = "position:absolute; top:20%; width:100%; text-align:center; color:red; font-size:2rem; font-family:Orbitron; animation:pulse 0.5s infinite;";
         warning.innerText = `WARNING: ${type.toUpperCase()} DETECTED`;
@@ -597,6 +588,8 @@ class GameLoop {
 
     initBackground() {
         this.bgAbyssal = []; this.bgDeep = []; this.bgMid = []; this.bgFore = [];
+
+        // AAA Optimization: Use Pre-rendered Sprites
         for(let i=0; i<6; i++) {
             this.bgAbyssal.push({
                 type: i % 2 === 0 ? 'giant_worm' : 'giant_jelly',
@@ -608,6 +601,7 @@ class GameLoop {
                 angle: Math.random() * Math.PI * 2
             });
         }
+
         for(let i=0; i<100; i++) this.bgDeep.push({ x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 6000, r: Math.random() * 4 + 2, alpha: Math.random() * 0.2 });
         for(let i=0; i<200; i++) this.bgMid.push({ x: (Math.random() - 0.5) * 4000, y: (Math.random() - 0.5) * 4000, r: Math.random() * 3, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, alpha: Math.random() * 0.3 });
         for(let i=0; i<50; i++) this.bgFore.push({ x: (Math.random() - 0.5) * 3000, y: (Math.random() - 0.5) * 3000, r: Math.random() * 2, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, alpha: Math.random() * 0.5 + 0.2 });
@@ -629,14 +623,18 @@ class GameLoop {
 
         if (this.hitstop > 0) {
             this.hitstop -= dt;
-            this.stateMachine.render(this.ctx); // Use state machine render
+            this.render();
             requestAnimationFrame((t) => this.loop(t));
             return;
         }
 
-        this.stateMachine.update(dt);
-        this.stateMachine.render(this.ctx);
+        if (this.gameState === 'playing') {
+            this.update(dt);
+        } else if (this.gameState === 'menu') {
+            this.updateBackgroundOnly(dt);
+        }
 
+        this.render();
         requestAnimationFrame((t) => this.loop(t));
     }
 
@@ -647,62 +645,256 @@ class GameLoop {
         this.bgFore.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; });
     }
 
-    renderBackgroundLayers(ctx) {
-        // --- LAYER 0: GOD RAYS (Parallax 0.0) ---
-        if (this.settings.fxEnabled) {
-            const rays = this.assets.get('god_rays');
-            ctx.save();
-            ctx.translate(this.width/2, this.height/2);
-            ctx.rotate(this.bgRays.angle);
-            ctx.scale(3, 3);
-            ctx.translate(-400, -400); // Center image
-            ctx.drawImage(rays, 0, 0);
-            ctx.restore();
+    update(dt) {
+        if (this.editor.active) {
+            // In Petri Mode, we don't update game physics
+            // We just update the camera slightly if needed or nothing
+            return;
         }
 
-        // --- LAYER 1: ABYSSAL GIANTS (Parallax 0.05) ---
-        ctx.save();
-        ctx.translate(this.width/2, this.height/2);
-        ctx.scale(this.camera.zoom, this.camera.zoom);
-        ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
+        if (this.creature.gameStats.health <= 0) {
+            this.gameState = 'gameover';
+            document.getElementById('game-over').style.display = 'flex';
+            document.getElementById('game-hud').style.display = 'none';
+            return;
+        }
 
-        this.bgAbyssal.forEach(g => {
-            const sprite = this.assets.get(g.type);
-            ctx.save();
-            ctx.translate(g.x, g.y);
-            ctx.rotate(g.angle);
-            ctx.scale(g.scale, g.scale);
-            ctx.drawImage(sprite, -sprite.width/2, -sprite.height/2);
-            ctx.restore();
-        });
-        ctx.restore();
+        const scale = Math.sqrt(this.creature.gameStats.mass / 10);
+        this.creature.points.forEach(p => { if(p.baseRadius) p.radius = p.baseRadius * scale; });
+        this.creature.constraints.forEach(c => { if(c.baseLength) c.length = c.baseLength * scale; });
 
-        // --- LAYER 2: DEEP PARTICLES (Parallax 0.1) ---
-        ctx.save();
-        ctx.translate(this.width/2, this.height/2);
-        ctx.scale(this.camera.zoom, this.camera.zoom);
-        ctx.translate(-this.camera.x * 0.1, -this.camera.y * 0.1);
-        ctx.fillStyle = '#fff';
-        this.bgDeep.forEach(p => { ctx.globalAlpha = p.alpha; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); });
-        ctx.restore();
+        const head = this.creature.points[0];
+        const inputVec = this.input.getVector();
+        const swimForce = (this.creature.stats.speed + 1000) * scale;
+        const turnSpeed = this.creature.stats.turnSpeed * 2.0;
 
-        // --- LAYER 3: MID PARTICLES (Parallax 0.5) ---
-        ctx.save();
-        ctx.translate(this.width/2, this.height/2);
-        ctx.scale(this.camera.zoom, this.camera.zoom);
-        ctx.translate(-this.camera.x * 0.5, -this.camera.y * 0.5);
-        ctx.fillStyle = '#aaffff';
-        this.bgMid.forEach(p => { ctx.globalAlpha = p.alpha; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); });
-        ctx.restore();
+        if (this.input.active) {
+            head.x += inputVec.x * swimForce * dt * dt;
+            head.y += inputVec.y * swimForce * dt * dt;
+            let targetAngle = Math.atan2(inputVec.y, inputVec.x);
+            let diff = targetAngle - this.headAngle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            this.headAngle += diff * turnSpeed * dt;
+        }
+
+        // Dash Ability (Double Tap)
+        if (this.input.checkDoubleTap()) {
+            // Check if unlocked
+            if (this.progression.isUnlocked('Booster')) {
+                // Apply impulse
+                const dashForce = 5000 * scale;
+                head.x += Math.cos(this.headAngle) * dashForce * dt;
+                head.y += Math.sin(this.headAngle) * dashForce * dt;
+
+                this.spawnParticles(head.x, head.y, '#fff', 20, 300);
+                if(this.settings.audioEnabled) this.audio.playDash();
+                if(navigator.vibrate) navigator.vibrate(50); // Short haptic
+            }
+        }
+
+        this.physics.update(this.creature.points, this.creature.constraints, dt);
+        this.updateBackgroundOnly(dt);
+        this.spawnEnemies();
+        this.boidManager.update(dt, this.enemies);
+
+        // Update Allies
+        for (let i = this.allies.length - 1; i >= 0; i--) {
+             const ally = this.allies[i];
+             ally.update(dt, this.enemies, head); // Pass enemies and player head
+
+             // Player vs Ally Collision (Soft Body)
+             Physics.checkSoftBodyCollision(this.creature.points, ally.points);
+
+             // Ally vs Enemies Combat
+             for (let e of this.enemies) {
+                 const res = this.resolveCombat(ally, e);
+                 if (res.hit) {
+                     if (res.playerHit) { // Ally Hit
+                         const dmg = Math.max(0, e.stats.damage - ally.stats.defense);
+                         ally.gameStats.health -= dmg;
+                         // Knockback
+                         const angle = Math.atan2(ally.points[0].y - e.points[0].y, ally.points[0].x - e.points[0].x);
+                         ally.points[0].vx += Math.cos(angle) * 500;
+                         ally.points[0].vy += Math.sin(angle) * 500;
+                     }
+                     if (res.enemyHit) { // Enemy Hit by Ally
+                         const dmg = Math.max(0, ally.stats.damage - e.stats.defense);
+                         e.health -= dmg;
+                         if(e.onHit) e.onHit();
+                         // Knockback
+                         const angle = Math.atan2(e.points[0].y - ally.points[0].y, e.points[0].x - ally.points[0].x);
+                         e.points[0].vx += Math.cos(angle) * 500;
+                         e.points[0].vy += Math.sin(angle) * 500;
+                     }
+                     // Particles
+                     const mx = (ally.points[0].x + e.points[0].x) / 2;
+                     const my = (ally.points[0].y + e.points[0].y) / 2;
+                     this.spawnParticles(mx, my, '#ff00ff', 3, 100);
+                 }
+             }
+
+             if (ally.gameStats.health <= 0) {
+                 this.spawnParticles(ally.points[0].x, ally.points[0].y, '#00ffff', 10, 300);
+                 this.allies.splice(i, 1);
+             }
+        }
+
+        this.skillManager.update(dt);
+        this.distortion.update(dt);
+        this.sonar.update(dt);
+
+        const playerRadius = head.radius;
+        for (let i = this.enemies.length - 1; i >= 0; i--) {
+            const e = this.enemies[i];
+            e.update(dt, head, playerRadius);
+
+            // 1. Body Physics (Bounce) - No Damage yet, just displacement
+            Physics.checkSoftBodyCollision(this.creature.points, e.points);
+
+            // 2. Advanced Combat (Locational Damage)
+            const result = this.resolveCombat(this.creature, e);
+
+            if (result.hit) {
+                // Apply Damage
+                if (result.playerHit) {
+                     const dmg = Math.max(0, e.stats.damage - this.creature.stats.defense);
+                     this.creature.gameStats.health -= dmg;
+                     this.creature.lastDamageTime = Date.now();
+                     if (dmg > 0 && navigator.vibrate) navigator.vibrate(100);
+
+                     // Recoil Player
+                     const angle = Math.atan2(head.y - e.points[0].y, head.x - e.points[0].x);
+                     head.vx += Math.cos(angle) * 500;
+                     head.vy += Math.sin(angle) * 500;
+                }
+                if (result.enemyHit) {
+                     const dmg = Math.max(0, this.creature.stats.damage - e.stats.defense);
+                     e.health -= dmg;
+                     if(e.onHit) e.onHit(); // Trigger Counter-Attack AI
+
+                     // Recoil Enemy / Stun
+                     const angle = Math.atan2(e.points[0].y - head.y, e.points[0].x - head.x);
+                     e.points[0].vx += Math.cos(angle) * 500;
+                     e.points[0].vy += Math.sin(angle) * 500;
+                }
+
+                this.hitstop = 0.05;
+                const mx = (head.x + e.points[0].x) / 2;
+                const my = (head.y + e.points[0].y) / 2;
+                this.spawnParticles(mx, my, '#ff0044', 5, 200);
+
+                // Camera Shake
+                this.camera.x += (Math.random()-0.5) * 10;
+                this.camera.y += (Math.random()-0.5) * 10;
+                if(this.settings.audioEnabled) this.audio.playTone(100, 'sawtooth', 0.1, mx, my, this.camera);
+
+                if (e.health <= 0) {
+                     this.spawnParticles(mx, my, '#ffaa00', 10, 400);
+                     this.spawnMeat(mx, my, 3 + Math.floor(e.scale));
+                     this.debris.push(new Debris(e.points, e.constraints, e.color, 4));
+                     this.distortion.addShockwave(mx, my);
+                     if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
+
+                     const drop = this.progression.checkDrop(null, e.difficulty);
+                     if (drop) this.triggerUnlock(drop);
+
+                     this.enemies.splice(i, 1);
+                     continue;
+                }
+            }
+
+            const dist = Math.hypot(head.x - e.points[0].x, head.y - e.points[0].y);
+            if (dist > 3000 && e.bossType !== 'Leviathan') this.enemies.splice(i, 1);
+            if (e.bossType && e.health <= 0) this.bossActive = false;
+        }
+
+        // Maintenance: Remove far food and spawn new food
+        // Remove food > 3000 away
+        for (let i = this.food.length - 1; i >= 0; i--) {
+            const f = this.food[i];
+            const dist = Math.hypot(head.x - f.x, head.y - f.y);
+
+            // Eat Logic
+            if (dist < head.radius + f.radius) {
+                this.food.splice(i, 1);
+                const dnaValue = f.dnaValue || 0.2; // Reduced from 1 to 0.2
+                this.creature.gameStats.dna += dnaValue;
+                this.creature.gameStats.mass += 0.5 * dnaValue;
+                this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
+
+                if(this.settings.audioEnabled) this.audio.playEat(f.x, f.y, this.camera);
+                if(navigator.vibrate) navigator.vibrate(20);
+
+                this.spawnParticles(f.x, f.y, f.color, 5, 100);
+
+                // Immediately spawn replacement nearby to maintain density
+                if (f.type !== 'meat') {
+                    const angle = Math.random() * Math.PI * 2;
+                    const d = 500 + Math.random() * 1000;
+                    this.food.push({
+                        x: head.x + Math.cos(angle) * d,
+                        y: head.y + Math.sin(angle) * d,
+                        radius: 5, color: '#0f0'
+                    });
+                }
+                continue;
+            }
+
+            // Cleanup Logic
+            if (dist > 3000) {
+                this.food.splice(i, 1);
+            }
+        }
+
+        // Maintain Minimum Food Count in World
+        if (this.food.length < 50) {
+            this.spawnFood(10);
+        }
+
+        if (this.creature.gameStats.dna >= 10 && !this.editor.active) {
+            const btn = document.getElementById('evolve-btn');
+            if (btn && btn.style.display === 'none') btn.style.display = 'block';
+        }
+
+        // Base Zoom: Further away for gameplay (0.7x default)
+        // Camera Update handles dynamic zoom based on mass, but we can tune the base scale there.
+        this.camera.update(head.x, head.y, head.vx, head.vy, dt, this.creature.gameStats.mass);
+
+        // Update Biome Effects
+        this.biomeManager.update(dt, this.creature);
+
+        for (let i = this.debris.length - 1; i >= 0; i--) {
+            const d = this.debris[i];
+            d.update(dt, this.physics);
+            if (!d.active) this.debris.splice(i, 1);
+        }
+
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
     }
 
     resolveCombat(player, enemy) {
         let result = { hit: false, playerHit: false, enemyHit: false };
 
+        // 1. Check Player Weapons vs Enemy Body
+        // Weapons: Spike, Jaws
         const weaponParts = player.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws' || p.type === 'Poison');
+
         for (let part of weaponParts) {
             const bone = player.points[part.boneIndex];
             if (!bone) continue;
+
+            // Calculate Tip Position (Approximate)
+            // Ideally we reuse the rotation logic from Renderer, but simpler here:
+            // Just assume it protrudes from the bone surface in the direction of the normal
+            // For simple soft bodies, normal is roughly (bone - prevBone).
+            // Let's use a simpler heuristic: Checks overlap of a "Weapon Hitbox"
+            // Weapon Hitbox = Circle at bone position with radius + 20.
+
             const range = bone.radius + 20;
 
             for (let ePoint of enemy.points) {
@@ -710,6 +902,7 @@ class GameLoop {
                 if (dist < range + ePoint.radius) {
                     result.hit = true;
                     result.enemyHit = true;
+                    // Knockback Enemy
                     const angle = Math.atan2(ePoint.y - bone.y, ePoint.x - bone.x);
                     ePoint.x += Math.cos(angle) * 10;
                     ePoint.y += Math.sin(angle) * 10;
@@ -719,6 +912,7 @@ class GameLoop {
             if (result.enemyHit) break;
         }
 
+        // 2. Check Enemy Weapons vs Player Body
         const enemyWeapons = enemy.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws');
         for (let part of enemyWeapons) {
             const bone = enemy.points[part.boneIndex];
@@ -730,6 +924,7 @@ class GameLoop {
                 if (dist < range + pPoint.radius) {
                     result.hit = true;
                     result.playerHit = true;
+                     // Knockback Player
                     const angle = Math.atan2(pPoint.y - bone.y, pPoint.x - bone.x);
                     pPoint.x += Math.cos(angle) * 10;
                     pPoint.y += Math.sin(angle) * 10;
@@ -739,11 +934,18 @@ class GameLoop {
             if (result.playerHit) break;
         }
 
+        // 3. Fallback: If bodies are touching deeply but no weapons, maybe minor friction damage?
+        // Or just bounce (handled by checkSoftBodyCollision).
+        // User requested: "If I charge without a spike, I shouldn't hurt them".
+        // So we do NOT set enemyHit = true for body collisions.
+
         return result;
     }
 
     spawnParticles(x, y, color, count, speedVar = 100) {
+        // Optimization: Cap particles
         if (this.particles.length > 50) return;
+
         for(let i=0; i<count; i++) {
             const angle = Math.random() * Math.PI * 2;
             const speed = Math.random() * speedVar;
@@ -759,15 +961,17 @@ class GameLoop {
         this.ctx.save();
         this.ctx.translate(x, y);
 
+        // Jelly Background
         const time = Date.now() * 0.002;
         this.ctx.fillStyle = 'rgba(0, 255, 255, 0.2)';
         this.ctx.strokeStyle = '#0ff';
         this.ctx.lineWidth = 2;
 
         this.ctx.beginPath();
+        // Draw a wobbly oval
         for (let i = 0; i <= Math.PI * 2; i += 0.1) {
             const r = 30 + Math.sin(i * 5 + time) * 2 + Math.cos(i * 3 - time) * 2;
-            const px = Math.cos(i) * r * 1.5;
+            const px = Math.cos(i) * r * 1.5; // Wider
             const py = Math.sin(i) * r;
             if (i === 0) this.ctx.moveTo(px, py);
             else this.ctx.lineTo(px, py);
@@ -776,6 +980,7 @@ class GameLoop {
         this.ctx.fill();
         this.ctx.stroke();
 
+        // DNA Icon/Text
         this.ctx.fillStyle = '#fff';
         this.ctx.font = 'bold 20px Orbitron, sans-serif';
         this.ctx.textAlign = 'center';
@@ -786,6 +991,136 @@ class GameLoop {
         this.ctx.shadowBlur = 0;
 
         this.ctx.restore();
+    }
+
+    render() {
+        if (this.editor.active) {
+            // Petri Dish Render Mode (Exclusive)
+            this.editor.render(this.ctx);
+            return;
+        }
+
+        // Update Lighting (Offscreen)
+        if (this.settings.fxEnabled && this.gameState === 'playing') {
+            this.lighting.update(this.camera, {
+                player: this.creature,
+                enemies: this.enemies,
+                food: this.food
+            });
+        }
+
+        // Dynamic Background based on Biome
+        const head = this.creature.points[0];
+        const biome = this.biomeManager.getCurrentBiome(head ? head.x : 0, head ? head.y : 0);
+
+        const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
+        bgGrad.addColorStop(0, '#000000');
+        bgGrad.addColorStop(1, biome.color);
+        this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // --- LAYER 0: GOD RAYS (Parallax 0.0) ---
+        if (this.settings.fxEnabled) {
+            const rays = this.assets.get('god_rays');
+            this.ctx.save();
+            this.ctx.translate(this.width/2, this.height/2);
+            this.ctx.rotate(this.bgRays.angle);
+            this.ctx.scale(3, 3);
+            this.ctx.translate(-400, -400); // Center image
+            this.ctx.drawImage(rays, 0, 0);
+            this.ctx.restore();
+        }
+
+        // --- LAYER 1: ABYSSAL GIANTS (Parallax 0.05) ---
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.05, -this.camera.y * 0.05);
+
+        this.bgAbyssal.forEach(g => {
+            const sprite = this.assets.get(g.type);
+            this.ctx.save();
+            this.ctx.translate(g.x, g.y);
+            this.ctx.rotate(g.angle);
+            this.ctx.scale(g.scale, g.scale);
+            this.ctx.drawImage(sprite, -sprite.width/2, -sprite.height/2);
+            this.ctx.restore();
+        });
+        this.ctx.restore();
+
+        // --- LAYER 2: DEEP PARTICLES (Parallax 0.1) ---
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.1, -this.camera.y * 0.1);
+        this.ctx.fillStyle = '#fff';
+        this.bgDeep.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
+        this.ctx.restore();
+
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 0.5, -this.camera.y * 0.5);
+        this.ctx.fillStyle = '#aaffff';
+        this.bgMid.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
+        this.ctx.restore();
+
+        this.camera.apply(this.ctx);
+        this.ctx.globalAlpha = 1.0;
+
+        if(this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
+        this.food.forEach(f => {
+            this.ctx.fillStyle = f.color;
+            if(this.settings.fxEnabled) { this.ctx.shadowColor = f.color; this.ctx.shadowBlur = 10; }
+            this.ctx.beginPath(); this.ctx.arc(f.x, f.y, f.radius, 0, Math.PI*2); this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+        });
+        this.ctx.globalCompositeOperation = 'source-over';
+
+        this.debris.forEach(d => d.render(this.ctx)); // Render debris under particles/enemies? Or maybe under food?
+
+        this.particles.forEach(p => { this.ctx.globalAlpha = p.life * 2; this.ctx.fillStyle = p.color; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); this.ctx.fill(); });
+        this.ctx.globalAlpha = 1.0;
+
+        this.enemies.forEach(e => e.render(this.ctx));
+
+        // Render Allies
+        this.allies.forEach(a => {
+            this.renderer.drawCreature(a, a.headAngle || 0);
+        });
+
+        if (this.gameState === 'playing' || this.gameState === 'paused') {
+            this.renderer.drawCreature(this.creature, this.headAngle);
+        }
+
+        this.camera.restore(this.ctx);
+
+        this.ctx.save();
+        this.ctx.translate(this.width/2, this.height/2);
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x * 1.5, -this.camera.y * 1.5);
+        this.ctx.fillStyle = '#ffffff';
+        this.bgFore.forEach(p => { this.ctx.globalAlpha = p.alpha; this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); this.ctx.fill(); });
+        this.ctx.restore();
+        this.ctx.globalAlpha = 1.0;
+
+        // Apply Lighting Overlay (Multiply) & Vignette
+        this.lighting.render(this.ctx);
+        this.distortion.render(this.ctx, this.camera);
+        this.sonar.render(this.ctx, this.camera);
+
+        if (this.gameState === 'playing') this.drawHUD();
+
+        if (this.input.active && !this.editor.active && this.gameState === 'playing') {
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.arc(this.input.startX, this.input.startY, 50, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
+            this.ctx.beginPath();
+            this.ctx.arc(this.input.currX, this.input.currY, 20, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
     }
 }
 
