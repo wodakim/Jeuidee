@@ -514,6 +514,8 @@ export default class Editor {
 
         // Render Clone Creature
         if (this.clone) {
+            // Force source-over for clone to ensure visibility over dark background
+            ctx.globalCompositeOperation = 'source-over';
             this.game.renderer.drawCreature(this.clone, -Math.PI/2); // Head pointing up
         }
 

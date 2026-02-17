@@ -701,14 +701,21 @@ class GameLoop {
                      this.creature.gameStats.health -= dmg;
                      this.creature.lastDamageTime = Date.now();
                      if (dmg > 0 && navigator.vibrate) navigator.vibrate(100);
+
+                     // Recoil Player
+                     const angle = Math.atan2(head.y - e.points[0].y, head.x - e.points[0].x);
+                     head.vx += Math.cos(angle) * 500;
+                     head.vy += Math.sin(angle) * 500;
                 }
                 if (result.enemyHit) {
-                     const dmg = Math.max(0, this.creature.stats.damage - e.stats.defense); // Base damage is low, mainly parts
-                     // Actually, if a specific part hit, we should use that part's damage?
-                     // For now, using stats.damage which aggregates part stats is fine,
-                     // BUT we only apply it if a WEAPON part hit.
-                     // The resolveCombat function returns 'enemyHit' ONLY if a weapon part hit.
+                     const dmg = Math.max(0, this.creature.stats.damage - e.stats.defense);
                      e.health -= dmg;
+                     if(e.onHit) e.onHit(); // Trigger Counter-Attack AI
+
+                     // Recoil Enemy / Stun
+                     const angle = Math.atan2(e.points[0].y - head.y, e.points[0].x - head.x);
+                     e.points[0].vx += Math.cos(angle) * 500;
+                     e.points[0].vy += Math.sin(angle) * 500;
                 }
 
                 this.hitstop = 0.05;
@@ -750,7 +757,7 @@ class GameLoop {
             // Eat Logic
             if (dist < head.radius + f.radius) {
                 this.food.splice(i, 1);
-                const dnaValue = f.dnaValue || 1;
+                const dnaValue = f.dnaValue || 0.2; // Reduced from 1 to 0.2
                 this.creature.gameStats.dna += dnaValue;
                 this.creature.gameStats.mass += 0.5 * dnaValue;
                 this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);

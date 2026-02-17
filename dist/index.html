@@ -1058,56 +1058,56 @@ const PARTS_DB = {
         desc: 'Increases Swim Speed and Turn Rate.',
         stat: '+ Speed',
         unlocked: true, // Default
-        cost: 5
+        cost: 25
     },
     'Spike': {
         name: 'Spike',
         desc: 'Deals damage on contact. Increases Defense.',
         stat: '+ Damage',
         unlocked: true, // Default
-        cost: 5
+        cost: 25
     },
     'Jaws': {
         name: 'Carnivore Jaw',
         desc: 'Frontal weapon. High damage.',
         stat: '++ Damage',
         unlocked: true, // Default
-        cost: 10
+        cost: 50
     },
     'Eye': {
         name: 'Eye',
         desc: 'Increases Field of View.',
         stat: '+ Vision',
         unlocked: true, // Default
-        cost: 5
+        cost: 20
     },
     'Tentacle': {
         name: 'Tentacle',
         desc: 'Wiggles and pushes enemies away.',
         stat: '+ Control',
         unlocked: false,
-        cost: 10
+        cost: 40
     },
     'Shield': {
         name: 'Chitin Plate',
         desc: 'Heavy armor that reduces incoming damage.',
         stat: '++ Defense',
         unlocked: false,
-        cost: 10
+        cost: 40
     },
     'Booster': {
         name: 'Jet Gland',
         desc: 'Burst of speed when moving forward.',
         stat: '++ Speed',
         unlocked: false,
-        cost: 15
+        cost: 60
     },
     'Poison': {
         name: 'Toxin Sac',
         desc: 'Enemies take damage over time after contact.',
         stat: '+ Poison',
         unlocked: false,
-        cost: 15
+        cost: 60
     }
 };
 
@@ -1366,14 +1366,8 @@ class Enemy {
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) this.pickState(playerHead);
 
-        // Steering
         let head = this.points[0];
         let dx = 0, dy = 0;
-
-        // Boids Logic overrides standard steering if in a flock and type is grazer
-        // This is handled by BoidManager, but we need to respect the result.
-        // Actually, let's allow BoidManager to modify position/velocity directly,
-        // and here we add the "Goal" steering (Chase/Flee/Wander).
 
         if (this.state === 'chase') {
             dx = playerHead.x - head.x;
@@ -1382,6 +1376,7 @@ class Enemy {
             dx = head.x - playerHead.x;
             dy = head.y - playerHead.y;
         } else {
+            // Wander
             dx = this.targetX - head.x;
             dy = this.targetY - head.y;
             if (Math.hypot(dx, dy) < 50) this.pickState(playerHead);
@@ -1389,32 +1384,63 @@ class Enemy {
 
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
-            const force = this.stats.speed * dt * dt; // Apply as impulse
-            // If grazer, reduce individual steering influence to let flocking work better
+            const force = this.stats.speed * dt * dt;
             const weight = this.type === 'grazer' ? 0.3 : 1.0;
 
             head.x += (dx / dist) * force * weight;
             head.y += (dy / dist) * force * weight;
         }
 
-        // Physics
         this.physics.update(this.points, this.constraints, dt);
     }
 
     pickState(playerHead) {
-        this.stateTimer = Math.random() * 3 + 1;
+        this.stateTimer = 1.0 + Math.random();
 
-        const dist = Math.hypot(playerHead.x - this.points[0].x, playerHead.y - this.points[0].y);
-        const aggroRange = this.type === 'grazer' ? 200 : 400 * this.scale;
+        const head = this.points[0];
+        const dist = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
+        const aggroRange = 600 * this.scale;
 
+        // Decision Logic
+        // 1. Health Critical? -> Flee
+        if (this.health < this.maxHealth * 0.3) {
+            this.state = 'flee';
+            this.color = '#ffaa00'; // Fear color
+            return;
+        }
+
+        // 2. Player Nearby?
         if (dist < aggroRange) {
-             // Aggressive if difficulty is high
-             if (this.type !== 'grazer' && this.difficulty > 3) this.state = 'chase';
-             else this.state = 'flee';
+            if (this.type === 'grazer') {
+                this.state = 'flee';
+            } else if (this.type === 'titan') {
+                this.state = 'chase';
+            } else {
+                // Hunter: Compare size/strength
+                // Simplistic: if player > 1.5x me, flee
+                // Need player radius reference? playerHead has radius property usually?
+                // Let's assume passed playerHead is just coordinate.
+                // We'll trust difficulty/scale for now.
+                // If I am small (diff < 5) and player is huge?
+                // Random chance to be brave or coward
+                if (Math.random() > 0.3) this.state = 'chase';
+                else this.state = 'flee';
+            }
         } else {
             this.state = 'wander';
-            this.targetX = this.points[0].x + (Math.random()-0.5) * 500;
-            this.targetY = this.points[0].y + (Math.random()-0.5) * 500;
+            // Wander logic: Pick point in front or random
+            this.targetX = head.x + (Math.random()-0.5) * 1000;
+            this.targetY = head.y + (Math.random()-0.5) * 1000;
+        }
+    }
+
+    // Called when damaged
+    onHit(sourceX, sourceY) {
+        // Counter attack logic
+        this.health -= 10; // Placeholder damage if not handled in gameloop
+        if (this.health > 0 && this.type !== 'grazer') {
+            this.state = 'chase'; // Aggro
+            this.stateTimer = 5.0; // Focus on player
         }
     }
 
@@ -2558,6 +2584,8 @@ class Editor {
 
         // Render Clone Creature
         if (this.clone) {
+            // Force source-over for clone to ensure visibility over dark background
+            ctx.globalCompositeOperation = 'source-over';
             this.game.renderer.drawCreature(this.clone, -Math.PI/2); // Head pointing up
         }
 
@@ -3873,14 +3901,21 @@ Ancestral DNA Gained: ${earned}`);
                      this.creature.gameStats.health -= dmg;
                      this.creature.lastDamageTime = Date.now();
                      if (dmg > 0 && navigator.vibrate) navigator.vibrate(100);
+
+                     // Recoil Player
+                     const angle = Math.atan2(head.y - e.points[0].y, head.x - e.points[0].x);
+                     head.vx += Math.cos(angle) * 500;
+                     head.vy += Math.sin(angle) * 500;
                 }
                 if (result.enemyHit) {
-                     const dmg = Math.max(0, this.creature.stats.damage - e.stats.defense); // Base damage is low, mainly parts
-                     // Actually, if a specific part hit, we should use that part's damage?
-                     // For now, using stats.damage which aggregates part stats is fine,
-                     // BUT we only apply it if a WEAPON part hit.
-                     // The resolveCombat function returns 'enemyHit' ONLY if a weapon part hit.
+                     const dmg = Math.max(0, this.creature.stats.damage - e.stats.defense);
                      e.health -= dmg;
+                     if(e.onHit) e.onHit(); // Trigger Counter-Attack AI
+
+                     // Recoil Enemy / Stun
+                     const angle = Math.atan2(e.points[0].y - head.y, e.points[0].x - head.x);
+                     e.points[0].vx += Math.cos(angle) * 500;
+                     e.points[0].vy += Math.sin(angle) * 500;
                 }
 
                 this.hitstop = 0.05;
@@ -3922,7 +3957,7 @@ Ancestral DNA Gained: ${earned}`);
             // Eat Logic
             if (dist < head.radius + f.radius) {
                 this.food.splice(i, 1);
-                const dnaValue = f.dnaValue || 1;
+                const dnaValue = f.dnaValue || 0.2; // Reduced from 1 to 0.2
                 this.creature.gameStats.dna += dnaValue;
                 this.creature.gameStats.mass += 0.5 * dnaValue;
                 this.creature.gameStats.health = Math.min(this.creature.gameStats.maxHealth, this.creature.gameStats.health + 5);
