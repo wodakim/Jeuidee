@@ -827,7 +827,7 @@ class Renderer {
                     part.ik = IKSystem.createTentacle(8, 10);
                 }
 
-                this.drawPart(part, bone.x, bone.y, spineAngle, bone.radius, color);
+                this.drawPart(part, bone.x, bone.y, spineAngle, bone.radius, color, headAngle);
             });
         }
 
@@ -856,26 +856,43 @@ class Renderer {
         this.ctx.restore();
     }
 
-    drawPart(part, x, y, spineAngle, radius, bodyColor) {
+    drawPart(part, x, y, spineAngle, radius, bodyColor, headAngle = 0) {
         const type = part.type;
         const side = part.side;
 
+        // Determine Angle
+        let drawAngle = spineAngle;
+
+        // If part has precise angle (from new Editor)
+        if (part.angle !== undefined) {
+             // part.angle is the Absolute Angle in the Editor (Spine Down = PI/2)
+             // We need to convert this to an offset relative to the spine.
+             // Editor Spine Angle = Math.PI/2
+             // Offset = part.angle - Math.PI/2
+
+             // However, spineAngle passed here is the CURRENT dynamic angle of the bone segment.
+             // So we apply the offset to the current spineAngle.
+             const offset = part.angle - Math.PI/2;
+             drawAngle = spineAngle + offset;
+        } else {
+             // Legacy
+             let sideAngle = 0;
+             if (side === 1) sideAngle = Math.PI/2;
+             else if (side === -1) sideAngle = -Math.PI/2;
+             else if (side === 2) sideAngle = Math.PI;
+             drawAngle = spineAngle + sideAngle;
+        }
+
         // Special handling for Tentacles (World Space Drawing via IK)
         if (type === 'Tentacle' && part.ik) {
-            // Calculate Attachment Point
-            let sideAngle = 0;
-            if (side === 1) sideAngle = Math.PI/2;
-            else if (side === -1) sideAngle = -Math.PI/2;
-
-            const attachAngle = spineAngle + sideAngle;
-            const rootX = x + Math.cos(attachAngle) * radius;
-            const rootY = y + Math.sin(attachAngle) * radius;
+            const rootX = x + Math.cos(drawAngle) * radius;
+            const rootY = y + Math.sin(drawAngle) * radius;
 
             // Update IK
-            IKSystem.update(part.ik, rootX, rootY, attachAngle, 0.016);
+            IKSystem.update(part.ik, rootX, rootY, drawAngle, 0.016);
 
             // Draw
-            this.ctx.save(); // Just in case, though IK draws world space
+            this.ctx.save();
             this.ctx.strokeStyle = '#a0f';
             this.ctx.lineWidth = Math.max(2, radius * 0.3);
             if (this.settings.fxEnabled) {
@@ -906,12 +923,8 @@ class Renderer {
         this.ctx.save();
         this.ctx.translate(x, y);
 
-        let sideAngle = 0;
-        if (side === 1) sideAngle = Math.PI/2;
-        else if (side === -1) sideAngle = -Math.PI/2;
-        else if (side === 2) sideAngle = Math.PI; // Nose/Tail Tip
-
-        this.ctx.rotate(spineAngle + sideAngle);
+        // Apply Rotation
+        this.ctx.rotate(drawAngle);
 
         const wobble = Math.sin(Date.now() * 0.005) * 0.1;
         this.ctx.rotate(wobble);
@@ -2455,74 +2468,66 @@ class Editor {
         this.dragY = pt.y;
     }
 
-    getClosestBone(pt) {
+    findClosestBodyNode(pt) {
         const cam = this.game.camera;
         let closest = null;
-        let minDist = 200; // Increased radius for better snapping
+        let minDist = 300; // Large radius for easy grabbing
 
         this.clone.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
-            const dx = sp.x - pt.x;
-            const dy = sp.y - pt.y;
-            const d = Math.sqrt(dx*dx + dy*dy);
-
-            // Screen space distance check
-            if (d < minDist) {
-                minDist = d;
+            const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
+            if (dist < minDist) {
+                minDist = dist;
                 closest = { point: p, index: index, sp: sp };
             }
         });
         return closest;
     }
 
-    calcSide(closest, dragX, dragY) {
-        // ... (No change needed here, works with snap logic) ...
-        // Re-implementing for file completeness
-        const bone = closest.point;
-        let spineVec = { x: 0, y: 0 };
+    getSnapInfo(node, dragX, dragY) {
+        // Calculate angle from node center to mouse (in screen space -> world vector)
+        const cam = this.game.camera;
+        const mouseWorld = cam.screenToWorld(dragX, dragY);
 
-        if (closest.index < this.clone.points.length - 1) {
-            const next = this.clone.points[closest.index + 1];
-            spineVec = { x: next.x - bone.x, y: next.y - bone.y };
-        } else {
-            const prev = this.clone.points[closest.index - 1];
-            spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
-        }
+        // Angle from bone center to mouse
+        const angle = Math.atan2(mouseWorld.y - node.point.y, mouseWorld.x - node.point.x);
 
-        const dropWorld = this.game.camera.screenToWorld(dragX, dragY);
-        const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
-        const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
-        const normDropX = dropVec.x / dropLen;
-        const normDropY = dropVec.y / dropLen;
+        // Determine "side" for symmetry logic or orientation
+        // We can just store the angle. But for compatibility with existing 'side' system:
+        // side 0: Front/Nose (roughly -PI/2 if spine is vertical)
+        // side 1: Right
+        // side -1: Left
 
-        const spineLen = Math.hypot(spineVec.x, spineVec.y) || 1;
-        const normSpineX = spineVec.x / spineLen;
-        const normSpineY = spineVec.y / spineLen;
+        // However, the new requirement says: "Force position: x = node.x + node.radius * cos(angle)"
+        // This implies we should store the precise angle or a generalized 'side' that includes angle.
+        // The existing Part system uses 'side' as an integer (-1, 0, 1).
+        // We need to refactor Part rendering to support arbitrary angles if we want true 360 attachment.
+        // OR we map the angle to the closest discrete side.
 
-        const dot = normSpineX * normDropX + normSpineY * normDropY;
-        const cross = normSpineX * normDropY - normSpineY * normDropX;
+        // User requested: "Force rotation: Part oriented by this angle (+/- 90)"
+        // This suggests we need to store the angle in the part data.
 
-        if (closest.index === 0 && dot < -0.7) return 2; // Nose
-
-        if (cross > 0) return -1;
-        return 1;
+        return { angle: angle };
     }
 
     endDrag(e) {
         if (!this.isDragging) return;
         this.isDragging = false;
 
-        const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
+        const closest = this.findClosestBodyNode({x: this.dragX, y: this.dragY});
 
         if (closest) {
-            // MAGNET SNAP: Force drop position to be valid relative to bone
-            // Visual feedback already showed snap, now logical placement
+            const snap = this.getSnapInfo(closest, this.dragX, this.dragY);
 
             const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
             let totalCost = cost;
-            const side = this.calcSide(closest, this.dragX, this.dragY);
 
-            if (this.symmetry && side !== 0) totalCost *= 2;
+            // Determine side for symmetry
+            // If angle is roughly right (0 to PI) or left (PI to 2PI/negative) relative to spine?
+            // Let's assume standard 'side' logic for symmetry cost calculation for now.
+            // But we will store the angle.
+
+            if (this.symmetry) totalCost *= 2; // Always double for simplicity if toggle is on
 
             if (this.clone.gameStats.dna < totalCost) {
                 alert("Not enough DNA!");
@@ -2530,10 +2535,18 @@ class Editor {
                 return;
             }
 
-            this.addPart(this.selectedPart, closest.index, side);
+            this.addPart(this.selectedPart, closest.index, snap.angle);
 
-            if (this.symmetry && side !== 0) {
-                this.addPart(this.selectedPart, closest.index, -side);
+            if (this.symmetry) {
+                // Mirror angle across spine axis?
+                // Assuming spine is roughly vertical (downwards y+).
+                // Angle mirrored across Y axis: PI - angle.
+                let mirrorAngle = Math.PI - snap.angle;
+                // Normalize
+                while(mirrorAngle > Math.PI) mirrorAngle -= Math.PI*2;
+                while(mirrorAngle < -Math.PI) mirrorAngle += Math.PI*2;
+
+                this.addPart(this.selectedPart, closest.index, mirrorAngle);
             }
 
             this.clone.gameStats.dna -= totalCost;
@@ -2544,12 +2557,13 @@ class Editor {
         this.selectedPart = null;
     }
 
-    addPart(type, index, side) {
+    addPart(type, index, angle) {
         if (!this.clone.parts) this.clone.parts = [];
         this.clone.parts.push({
             type: type,
             boneIndex: index,
-            side: side
+            angle: angle, // NEW: precise angle
+            side: 0 // Legacy/Unused for rendering now, but kept for schema
         });
     }
 
@@ -4019,6 +4033,20 @@ class PlayState {
         const dna = Math.floor(game.creature.gameStats.dna);
         const w = game.width;
 
+        // Ensure Evolve Button Visibility Logic
+        const evolveBtn = document.getElementById('evolve-btn');
+        if (evolveBtn) {
+            if (dna >= 10 && !game.editor.active) {
+                evolveBtn.style.display = 'block';
+                evolveBtn.innerText = `EVOLVE (10 DNA)`;
+                // Pulse effect
+                const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 1.0;
+                evolveBtn.style.transform = `scale(${pulse})`;
+            } else {
+                evolveBtn.style.display = 'none';
+            }
+        }
+
         ctx.save();
         ctx.fillStyle = 'rgba(0, 10, 30, 0.8)';
         ctx.fillRect(0, 0, w, 60);
@@ -4027,12 +4055,23 @@ class PlayState {
         ctx.strokeStyle = '#00aaff';
         ctx.lineWidth = 1;
         ctx.stroke();
+
+        // Text
         ctx.fillStyle = '#00aaff';
         ctx.font = '20px Orbitron';
         ctx.textAlign = 'left';
-        ctx.fillText(`DNA-SEQUENCE: ${dna}`, 20, 38);
+        ctx.fillText(`DNA: ${dna} / 10`, 20, 38); // Show target
+
         ctx.textAlign = 'right';
         ctx.fillText(`TIER: ${this.currentTier}`, w - 20, 38);
+
+        // Progress Bar
+        const progress = Math.min(1.0, dna / 10.0);
+        ctx.fillStyle = '#004444';
+        ctx.fillRect(20, 45, 200, 5);
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(20, 45, 200 * progress, 5);
+
         ctx.restore();
     }
 }
@@ -4255,9 +4294,36 @@ class IntroState {
             // Text: "PHASE 1: THE AWAKENING"
             if (this.time > 1.0) {
                 ctx.fillStyle = `rgba(0, 255, 255, ${Math.min(1, (this.time - 1.0))})`;
-                ctx.font = '30px Orbitron';
+
+                // Responsive font size
+                const fontSize = Math.max(20, Math.min(40, w * 0.05));
+                ctx.font = `${fontSize}px Orbitron`;
                 ctx.textAlign = 'center';
-                ctx.fillText("PHASE 1: THE PRIMORDIAL SOUP", cx, cy);
+
+                // Word wrap logic
+                const text = "PHASE 1: THE PRIMORDIAL SOUP";
+                const maxWidth = w * 0.9;
+
+                // Simple word wrap
+                const words = text.split(' ');
+                let line = '';
+                let y = cy;
+                const lineHeight = fontSize * 1.5;
+
+                for(let n = 0; n < words.length; n++) {
+                    const testLine = line + words[n] + ' ';
+                    const metrics = ctx.measureText(testLine);
+                    const testWidth = metrics.width;
+                    if (testWidth > maxWidth && n > 0) {
+                        ctx.fillText(line, cx, y);
+                        line = words[n] + ' ';
+                        y += lineHeight;
+                    }
+                    else {
+                        line = testLine;
+                    }
+                }
+                ctx.fillText(line, cx, y);
             }
         }
     }
@@ -4557,11 +4623,12 @@ class GameLoop {
         // Game Over Screen
         const gameOver = document.createElement('div');
         gameOver.id = 'game-over';
-        gameOver.style = 'display:none';
+        gameOver.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:200; flex-direction:column; justify-content:center; align-items:center; background:rgba(0,0,0,0.8);';
         gameOver.innerHTML = `
             <h1 style="color:var(--danger); text-shadow:0 0 20px var(--danger);">EXTINCT</h1>
-            <div style="margin-top:20px;">
+            <div style="margin-top:20px; display:flex; flex-direction:column; gap:20px;">
                 <button id="respawn-btn" class="btn-neon btn-danger">REBIRTH</button>
+                <button id="gameover-menu-btn" class="btn-neon" style="border-color:#fff; color:#fff;">MAIN MENU</button>
             </div>
         `;
         document.body.appendChild(gameOver);
@@ -4616,6 +4683,12 @@ class GameLoop {
         };
         document.getElementById('pause-trigger-btn').onclick = () => this.pauseGame();
         document.getElementById('respawn-btn').onclick = () => this.respawn();
+        document.getElementById('gameover-menu-btn').onclick = () => {
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+            document.getElementById('game-hud').style.display = 'none';
+            this.stateMachine.change('menu');
+        };
         document.getElementById('evolve-btn').onclick = () => {
             this.editor.toggle(true);
             document.getElementById('evolve-btn').style.display = 'none';

@@ -343,74 +343,66 @@ export default class Editor {
         this.dragY = pt.y;
     }
 
-    getClosestBone(pt) {
+    findClosestBodyNode(pt) {
         const cam = this.game.camera;
         let closest = null;
-        let minDist = 200; // Increased radius for better snapping
+        let minDist = 300; // Large radius for easy grabbing
 
         this.clone.points.forEach((p, index) => {
             const sp = cam.worldToScreen(p.x, p.y);
-            const dx = sp.x - pt.x;
-            const dy = sp.y - pt.y;
-            const d = Math.sqrt(dx*dx + dy*dy);
-
-            // Screen space distance check
-            if (d < minDist) {
-                minDist = d;
+            const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
+            if (dist < minDist) {
+                minDist = dist;
                 closest = { point: p, index: index, sp: sp };
             }
         });
         return closest;
     }
 
-    calcSide(closest, dragX, dragY) {
-        // ... (No change needed here, works with snap logic) ...
-        // Re-implementing for file completeness
-        const bone = closest.point;
-        let spineVec = { x: 0, y: 0 };
+    getSnapInfo(node, dragX, dragY) {
+        // Calculate angle from node center to mouse (in screen space -> world vector)
+        const cam = this.game.camera;
+        const mouseWorld = cam.screenToWorld(dragX, dragY);
 
-        if (closest.index < this.clone.points.length - 1) {
-            const next = this.clone.points[closest.index + 1];
-            spineVec = { x: next.x - bone.x, y: next.y - bone.y };
-        } else {
-            const prev = this.clone.points[closest.index - 1];
-            spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
-        }
+        // Angle from bone center to mouse
+        const angle = Math.atan2(mouseWorld.y - node.point.y, mouseWorld.x - node.point.x);
 
-        const dropWorld = this.game.camera.screenToWorld(dragX, dragY);
-        const dropVec = { x: dropWorld.x - bone.x, y: dropWorld.y - bone.y };
-        const dropLen = Math.hypot(dropVec.x, dropVec.y) || 1;
-        const normDropX = dropVec.x / dropLen;
-        const normDropY = dropVec.y / dropLen;
+        // Determine "side" for symmetry logic or orientation
+        // We can just store the angle. But for compatibility with existing 'side' system:
+        // side 0: Front/Nose (roughly -PI/2 if spine is vertical)
+        // side 1: Right
+        // side -1: Left
 
-        const spineLen = Math.hypot(spineVec.x, spineVec.y) || 1;
-        const normSpineX = spineVec.x / spineLen;
-        const normSpineY = spineVec.y / spineLen;
+        // However, the new requirement says: "Force position: x = node.x + node.radius * cos(angle)"
+        // This implies we should store the precise angle or a generalized 'side' that includes angle.
+        // The existing Part system uses 'side' as an integer (-1, 0, 1).
+        // We need to refactor Part rendering to support arbitrary angles if we want true 360 attachment.
+        // OR we map the angle to the closest discrete side.
 
-        const dot = normSpineX * normDropX + normSpineY * normDropY;
-        const cross = normSpineX * normDropY - normSpineY * normDropX;
+        // User requested: "Force rotation: Part oriented by this angle (+/- 90)"
+        // This suggests we need to store the angle in the part data.
 
-        if (closest.index === 0 && dot < -0.7) return 2; // Nose
-
-        if (cross > 0) return -1;
-        return 1;
+        return { angle: angle };
     }
 
     endDrag(e) {
         if (!this.isDragging) return;
         this.isDragging = false;
 
-        const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
+        const closest = this.findClosestBodyNode({x: this.dragX, y: this.dragY});
 
         if (closest) {
-            // MAGNET SNAP: Force drop position to be valid relative to bone
-            // Visual feedback already showed snap, now logical placement
+            const snap = this.getSnapInfo(closest, this.dragX, this.dragY);
 
             const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
             let totalCost = cost;
-            const side = this.calcSide(closest, this.dragX, this.dragY);
 
-            if (this.symmetry && side !== 0) totalCost *= 2;
+            // Determine side for symmetry
+            // If angle is roughly right (0 to PI) or left (PI to 2PI/negative) relative to spine?
+            // Let's assume standard 'side' logic for symmetry cost calculation for now.
+            // But we will store the angle.
+
+            if (this.symmetry) totalCost *= 2; // Always double for simplicity if toggle is on
 
             if (this.clone.gameStats.dna < totalCost) {
                 alert("Not enough DNA!");
@@ -418,10 +410,18 @@ export default class Editor {
                 return;
             }
 
-            this.addPart(this.selectedPart, closest.index, side);
+            this.addPart(this.selectedPart, closest.index, snap.angle);
 
-            if (this.symmetry && side !== 0) {
-                this.addPart(this.selectedPart, closest.index, -side);
+            if (this.symmetry) {
+                // Mirror angle across spine axis?
+                // Assuming spine is roughly vertical (downwards y+).
+                // Angle mirrored across Y axis: PI - angle.
+                let mirrorAngle = Math.PI - snap.angle;
+                // Normalize
+                while(mirrorAngle > Math.PI) mirrorAngle -= Math.PI*2;
+                while(mirrorAngle < -Math.PI) mirrorAngle += Math.PI*2;
+
+                this.addPart(this.selectedPart, closest.index, mirrorAngle);
             }
 
             this.clone.gameStats.dna -= totalCost;
@@ -432,12 +432,13 @@ export default class Editor {
         this.selectedPart = null;
     }
 
-    addPart(type, index, side) {
+    addPart(type, index, angle) {
         if (!this.clone.parts) this.clone.parts = [];
         this.clone.parts.push({
             type: type,
             boneIndex: index,
-            side: side
+            angle: angle, // NEW: precise angle
+            side: 0 // Legacy/Unused for rendering now, but kept for schema
         });
     }
 

@@ -165,11 +165,12 @@ class GameLoop {
         // Game Over Screen
         const gameOver = document.createElement('div');
         gameOver.id = 'game-over';
-        gameOver.style = 'display:none';
+        gameOver.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:200; flex-direction:column; justify-content:center; align-items:center; background:rgba(0,0,0,0.8);';
         gameOver.innerHTML = `
             <h1 style="color:var(--danger); text-shadow:0 0 20px var(--danger);">EXTINCT</h1>
-            <div style="margin-top:20px;">
+            <div style="margin-top:20px; display:flex; flex-direction:column; gap:20px;">
                 <button id="respawn-btn" class="btn-neon btn-danger">REBIRTH</button>
+                <button id="gameover-menu-btn" class="btn-neon" style="border-color:#fff; color:#fff;">MAIN MENU</button>
             </div>
         `;
         document.body.appendChild(gameOver);
@@ -224,6 +225,12 @@ class GameLoop {
         };
         document.getElementById('pause-trigger-btn').onclick = () => this.pauseGame();
         document.getElementById('respawn-btn').onclick = () => this.respawn();
+        document.getElementById('gameover-menu-btn').onclick = () => {
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+            document.getElementById('game-hud').style.display = 'none';
+            this.stateMachine.change('menu');
+        };
         document.getElementById('evolve-btn').onclick = () => {
             this.editor.toggle(true);
             document.getElementById('evolve-btn').style.display = 'none';

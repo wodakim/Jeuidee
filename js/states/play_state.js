@@ -481,6 +481,20 @@ export default class PlayState {
         const dna = Math.floor(game.creature.gameStats.dna);
         const w = game.width;
 
+        // Ensure Evolve Button Visibility Logic
+        const evolveBtn = document.getElementById('evolve-btn');
+        if (evolveBtn) {
+            if (dna >= 10 && !game.editor.active) {
+                evolveBtn.style.display = 'block';
+                evolveBtn.innerText = `EVOLVE (10 DNA)`;
+                // Pulse effect
+                const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 1.0;
+                evolveBtn.style.transform = `scale(${pulse})`;
+            } else {
+                evolveBtn.style.display = 'none';
+            }
+        }
+
         ctx.save();
         ctx.fillStyle = 'rgba(0, 10, 30, 0.8)';
         ctx.fillRect(0, 0, w, 60);
@@ -489,12 +503,23 @@ export default class PlayState {
         ctx.strokeStyle = '#00aaff';
         ctx.lineWidth = 1;
         ctx.stroke();
+
+        // Text
         ctx.fillStyle = '#00aaff';
         ctx.font = '20px Orbitron';
         ctx.textAlign = 'left';
-        ctx.fillText(`DNA-SEQUENCE: ${dna}`, 20, 38);
+        ctx.fillText(`DNA: ${dna} / 10`, 20, 38); // Show target
+
         ctx.textAlign = 'right';
         ctx.fillText(`TIER: ${this.currentTier}`, w - 20, 38);
+
+        // Progress Bar
+        const progress = Math.min(1.0, dna / 10.0);
+        ctx.fillStyle = '#004444';
+        ctx.fillRect(20, 45, 200, 5);
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(20, 45, 200 * progress, 5);
+
         ctx.restore();
     }
 }
