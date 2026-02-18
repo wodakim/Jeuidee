@@ -97,6 +97,15 @@ class GameLoop {
 
         // UI Layers
         this.createUI();
+
+        // State Machine
+        this.stateMachine = new StateMachine(this);
+        this.stateMachine.add('menu', new MenuState(this));
+        this.stateMachine.add('playing', new PlayState(this));
+        this.stateMachine.add('gameover', new GameOverState(this));
+        this.stateMachine.add('intro', new IntroState(this));
+        this.stateMachine.add('genesis', new GenesisState(this));
+
         this.init();
     }
 
@@ -288,7 +297,7 @@ class GameLoop {
     toggleAudio() {
         const state = this.settings.toggleAudio();
         this.updateSettingsButtons();
-        if(state) this.audio.ctx.resume();
+        if(state) this.audio.resume();
         else this.audio.ctx.suspend();
     }
 
