@@ -10,6 +10,7 @@ export default class Enemy {
         // AI & Tier Props
         this.tier = 1; // Default
         this.mass = 10; // Default approximation
+        this.persistent = false; // Flag to prevent despawning
 
         // Procedural Generation
         this.scale = 1 + (difficulty * 0.2); // Growth
@@ -136,40 +137,35 @@ export default class Enemy {
 
         const head = this.points[0];
         const dist = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
-        const aggroRange = 800 * this.scale;
+        const aggroRange = (this.persistent ? 2000 : 800) * this.scale; // Persistent (Apex) has huge aggro
 
         // Decision Logic
         // 1. Health Critical? -> Flee
-        if (this.health < this.maxHealth * 0.3) {
+        if (this.health < this.maxHealth * 0.3 && !this.persistent) {
             this.state = 'flee';
             this.color = '#ffaa00'; // Fear color
             return;
         }
 
         // 2. Player Nearby?
-        if (dist < aggroRange) {
+        if (dist < aggroRange || this.persistent) { // Apex always chases if persistent
             if (this.type === 'grazer') {
                 this.state = 'flee';
-            } else if (this.type === 'titan') {
+            } else if (this.type === 'titan' || this.persistent) {
                 this.state = 'chase';
             } else {
                 // Hunter: Compare Mass
-                // If player is significantly larger (1.5x), Flee
-                // If player is smaller (0.8x), Hunt
-
                 if (playerMass > this.mass * 1.5) {
                     this.state = 'flee';
                 } else if (playerMass < this.mass * 0.8) {
                     this.state = 'chase';
                 } else {
-                    // Equal match: Random bravery
                     if (Math.random() > 0.5) this.state = 'chase';
-                    else this.state = 'wander'; // Ignore
+                    else this.state = 'wander';
                 }
             }
         } else {
             this.state = 'wander';
-            // Wander logic: Pick point in front or random
             this.targetX = head.x + (Math.random()-0.5) * 1000;
             this.targetY = head.y + (Math.random()-0.5) * 1000;
         }

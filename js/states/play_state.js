@@ -14,6 +14,7 @@ export default class PlayState {
 
         // Apex Predator Timer
         this.apexTimer = 30.0; // Seconds
+        this.activeApex = null; // Track current apex
     }
 
     enter(params) {
@@ -156,6 +157,8 @@ export default class PlayState {
                      if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
                      const drop = game.progression.checkDrop(null, e.difficulty);
                      if (drop) game.triggerUnlock(drop);
+
+                     if (e.persistent) this.activeApex = null; // Apex died
                      game.enemies.splice(i, 1);
                      continue;
                 }
@@ -218,22 +221,22 @@ export default class PlayState {
 
         // --- Apex Predator Logic ---
         this.apexTimer -= dt;
-        if (this.apexTimer <= 0) {
+        if (this.apexTimer <= 0 && !this.activeApex) {
             this.apexTimer = 30.0; // Reset
-            // Spawn Apex Hunter (Tier + 1 or just big)
             const angle = Math.random() * Math.PI * 2;
             const dist = 1200 * playerScale;
             const x = playerHead.x + Math.cos(angle) * dist;
             const y = playerHead.y + Math.sin(angle) * dist;
 
             const apex = new Enemy(x, y, (this.currentTier + 1) * 3, game.physics, 'hunter');
-            apex.scale = (this.currentTier + 1) * 1.5; // Bigger
-            apex.color = '#ff0000'; // Threat
-            apex.state = 'chase'; // Force aggro
+            apex.scale = (this.currentTier + 1) * 1.5;
+            apex.color = '#ff0000';
+            apex.state = 'chase';
             apex.health = 100 * this.currentTier;
-            // Force Weapon
             apex.parts.push({type: 'Jaws', boneIndex: 0, side: 0});
+            apex.persistent = true; // Important!
             game.enemies.push(apex);
+            this.activeApex = apex;
 
             // Warning
             game.distortion.addShockwave(x, y);
@@ -257,11 +260,11 @@ export default class PlayState {
             const e = game.enemies[i];
             const dist = Math.hypot(playerHead.x - e.points[0].x, playerHead.y - e.points[0].y);
 
-            if (dist > despawnDist && e.bossType !== 'Leviathan') {
+            if (dist > despawnDist && e.bossType !== 'Leviathan' && !e.persistent) {
                 game.enemies.splice(i, 1);
                 continue;
             }
-            if (e.tier < this.currentTier - 1) {
+            if (e.tier < this.currentTier - 1 && !e.persistent) {
                 game.enemies.splice(i, 1);
             }
         }
@@ -393,6 +396,47 @@ export default class PlayState {
         game.sonar.render(ctx, game.camera);
 
         this.drawHUD(ctx);
+        this.drawApexWarning(ctx);
+    }
+
+    drawApexWarning(ctx) {
+        if (!this.activeApex) return;
+
+        const game = this.game;
+        const cam = game.camera;
+        const target = this.activeApex.points[0];
+        const screenPos = cam.worldToScreen(target.x, target.y);
+        const w = game.width;
+        const h = game.height;
+
+        // Check if offscreen
+        if (screenPos.x < 0 || screenPos.x > w || screenPos.y < 0 || screenPos.y > h) {
+            const cx = w/2;
+            const cy = h/2;
+            const angle = Math.atan2(screenPos.y - cy, screenPos.x - cx);
+            const r = Math.min(w, h)/2 - 40;
+
+            const px = cx + Math.cos(angle) * r;
+            const py = cy + Math.sin(angle) * r;
+
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(angle);
+            ctx.fillStyle = '#f00';
+            ctx.beginPath();
+            ctx.moveTo(10, 0); ctx.lineTo(-10, 10); ctx.lineTo(-10, -10);
+            ctx.fill();
+            ctx.restore();
+
+            // Text Pulse
+            const pulse = (Date.now() % 1000) / 1000;
+            if (pulse < 0.5) {
+                ctx.fillStyle = '#f00';
+                ctx.font = '20px Orbitron';
+                ctx.textAlign = 'center';
+                ctx.fillText("DANGER", px, py + 30);
+            }
+        }
     }
 
     renderParallax(ctx) {

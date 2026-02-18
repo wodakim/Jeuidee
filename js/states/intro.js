@@ -88,7 +88,7 @@ export default class IntroState {
 
             // Camera pans down or we fade in the creature
             if (this.time > 4.0) {
-                this.game.stateMachine.change('playing', { reset: true });
+                this.game.stateMachine.change('genesis');
             }
         }
     }
