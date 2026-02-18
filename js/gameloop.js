@@ -14,6 +14,7 @@ import BoidManager from './boids.js';
 import Debris from './debris.js';
 import Lighting from './lighting.js';
 import BiomeManager from './biomes.js';
+import Background from './background.js';
 import LegacyManager, { LEGACY_UPGRADES } from './legacy.js';
 import Social from './social.js';
 import SkillManager from './skills.js';
@@ -28,6 +29,8 @@ import PlayState from './states/play_state.js';
 import GameOverState from './states/gameover_state.js';
 import IntroState from './states/intro.js';
 import GenesisState from './states/genesis_state.js';
+import BrainState from './states/brain.js';
+import EmergenceState from './states/emergence.js';
 
 class GameLoop {
     constructor() {
@@ -65,6 +68,7 @@ class GameLoop {
         this.assets = new AssetGenerator();
         this.boidManager = new BoidManager(this.physics);
         this.biomeManager = new BiomeManager(this);
+        this.background = new Background(this);
         this.headAngle = 0;
         this.editor = new Editor(this);
         this.skillManager = new SkillManager(this);
@@ -97,6 +101,8 @@ class GameLoop {
         this.stateMachine.add('gameover', new GameOverState(this));
         this.stateMachine.add('intro', new IntroState(this));
         this.stateMachine.add('genesis', new GenesisState(this));
+        this.stateMachine.add('brain', new BrainState(this));
+        this.stateMachine.add('emergence', new EmergenceState(this));
 
         this.init();
     }
@@ -488,6 +494,7 @@ class GameLoop {
         this.canvas.height = this.height;
         this.camera.resize(this.width, this.height);
         if (this.lighting) this.lighting.resize(this.width, this.height);
+        if (this.background) this.background.resize(this.width, this.height);
     }
 
     spawnFood(count) {

@@ -2,32 +2,21 @@ export default class IntroState {
     constructor(game) {
         this.game = game;
         this.time = 0;
-        this.phase = 'space'; // space, entry, impact, submerged, transition
+        this.phase = 'space'; // space, entry, impact, sink, awaken
         this.stars = [];
-        this.bubbles = [];
-        this.planetScale = 0;
-        this.impactFlash = 0;
+        this.shard = null; // The specific rock we follow
+        this.particles = []; // General FX
 
-        // Create DOM Elements for Text
+        // DOM Overlay for Text
         this.titleOverlay = document.createElement('div');
         this.titleOverlay.className = 'intro-title';
         this.titleOverlay.style = `
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 100%;
-            text-align: center;
-            color: rgba(0, 255, 255, 0);
-            font-family: Orbitron;
-            font-size: clamp(1.5rem, 5vw, 3rem);
-            white-space: normal;
-            word-wrap: break-word;
-            pointer-events: none;
-            z-index: 50;
-            transition: opacity 1s;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 100%; text-align: center; color: rgba(0, 255, 255, 0);
+            font-family: Orbitron; font-size: clamp(1.5rem, 5vw, 3rem);
+            pointer-events: none; z-index: 50; transition: opacity 2s;
         `;
-        this.titleOverlay.innerText = "PHASE 1: THE PRIMORDIAL SOUP";
+        this.titleOverlay.innerText = "PHASE 1: PANSPERMIA";
         document.body.appendChild(this.titleOverlay);
 
         this.skipBtn = document.createElement('button');
@@ -40,12 +29,16 @@ export default class IntroState {
         this.skipBtn.onclick = () => this.game.stateMachine.change('genesis');
         document.body.appendChild(this.skipBtn);
 
-        // Init Stars
-        for(let i=0; i<100; i++) {
+        this.initStars();
+    }
+
+    initStars() {
+        this.stars = [];
+        for(let i=0; i<200; i++) {
             this.stars.push({
-                x: (Math.random()-0.5) * window.innerWidth,
-                y: (Math.random()-0.5) * window.innerHeight,
-                z: Math.random() * 2 // depth
+                x: (Math.random()-0.5) * window.innerWidth * 2,
+                y: (Math.random()-0.5) * window.innerHeight * 2,
+                z: Math.random() * 2 + 0.1
             });
         }
     }
@@ -53,19 +46,23 @@ export default class IntroState {
     enter() {
         this.time = 0;
         this.phase = 'space';
-        this.game.audio.startAmbient(); // Ensure audio is ready
+        this.game.audio.startAmbient();
         document.getElementById('game-hud').style.display = 'none';
-
-        // Hide Main Menu if visible
         document.getElementById('main-menu').style.display = 'none';
         this.skipBtn.style.display = 'block';
         this.titleOverlay.style.color = 'rgba(0, 255, 255, 0)';
+        this.titleOverlay.innerText = "PHASE 1: PANSPERMIA";
+
+        // Reset Camera
+        this.game.camera.x = 0;
+        this.game.camera.y = 0;
+        this.game.camera.zoom = 1;
     }
 
     exit() {
         this.skipBtn.style.display = 'none';
         this.titleOverlay.style.display = 'none';
-        this.titleOverlay.remove(); // Cleanup DOM
+        this.titleOverlay.remove();
         this.skipBtn.remove();
     }
 
@@ -73,58 +70,92 @@ export default class IntroState {
         this.time += dt;
 
         if (this.phase === 'space') {
-            // Move stars
+            // Comet Flying
+            // Stars move fast (Parallax)
             this.stars.forEach(s => {
                 s.z -= dt * 0.5;
                 if (s.z <= 0) s.z += 2;
             });
 
-            // Planet grows
-            if (this.time > 2.0) {
-                this.planetScale += dt * 0.5;
+            // Camera shake builds up
+            if (this.time > 3.0) {
+                 this.game.camera.x = (Math.random()-0.5) * (this.time - 3) * 2;
+                 this.game.camera.y = (Math.random()-0.5) * (this.time - 3) * 2;
             }
 
-            if (this.planetScale > 5.0) {
+            if (this.time > 5.0) {
                 this.phase = 'entry';
-                this.time = 0; // Reset local time for next phase
-            }
-        }
-        else if (this.phase === 'entry') {
-            // Shake and burn
-            this.planetScale += dt * 10.0; // Fast zoom into surface
-
-            if (this.time > 1.5) {
-                this.phase = 'impact';
-                this.impactFlash = 1.0;
                 this.time = 0;
                 if(navigator.vibrate) navigator.vibrate(200);
             }
         }
-        else if (this.phase === 'impact') {
-            this.impactFlash -= dt * 0.5;
-            if (this.time > 2.0) {
-                this.phase = 'submerged';
+        else if (this.phase === 'entry') {
+            // Screen turns white/red
+            this.game.camera.x = (Math.random()-0.5) * 20;
+            this.game.camera.y = (Math.random()-0.5) * 20;
+
+            if (this.time > 1.5) {
+                this.phase = 'impact';
                 this.time = 0;
-                // Initialize bubbles
-                for(let i=0; i<50; i++) {
-                    this.bubbles.push({
-                        x: Math.random() * this.game.width,
-                        y: this.game.height + Math.random() * 500,
+                // Spawn Shards
+                this.shard = { x: 0, y: -this.game.height, vx: 0, vy: 500, r: 20, heat: 1.0 };
+                if(navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            }
+        }
+        else if (this.phase === 'impact') {
+            // Flash fades
+            if (this.time > 0.5) {
+                this.phase = 'sink';
+                this.time = 0;
+                this.game.camera.zoom = 1.0;
+
+                // Init sinking particles
+                for(let i=0; i<20; i++) {
+                    this.particles.push({
+                        x: (Math.random()-0.5) * 400,
+                        y: -this.game.height/2 - Math.random() * 500,
+                        vx: (Math.random()-0.5) * 50,
+                        vy: 100 + Math.random() * 200,
                         r: 2 + Math.random() * 5,
-                        v: 50 + Math.random() * 100
+                        life: 10
                     });
                 }
             }
         }
-        else if (this.phase === 'submerged') {
-            // Bubbles rise
-            this.bubbles.forEach(b => {
-                b.y -= b.v * dt;
-                b.x += Math.sin(b.y * 0.05) * 1;
+        else if (this.phase === 'sink') {
+            // Follow Shard
+            this.shard.vy *= 0.95; // Drag
+            this.shard.y += this.shard.vy * dt;
+            this.shard.heat -= dt * 0.2; // Cooling
+
+            // Camera follow with lag
+            this.game.camera.y += (this.shard.y - this.game.camera.y) * 0.1;
+
+            // Particles
+            this.particles.forEach(p => {
+                p.y += p.vy * dt;
+                p.x += p.vx * dt;
             });
 
-            // Camera pans down or we fade in the creature
+            // Text Fade In
+            if (this.time > 1.0 && this.time < 1.5) {
+                 this.titleOverlay.style.color = 'rgba(0, 255, 255, 1)';
+            }
             if (this.time > 4.0) {
+                 this.titleOverlay.style.color = 'rgba(0, 255, 255, 0)';
+            }
+
+            if (this.time > 6.0) {
+                this.phase = 'awaken';
+                this.time = 0;
+            }
+        }
+        else if (this.phase === 'awaken') {
+            // Zoom in on shard
+            this.game.camera.zoom += dt * 0.5;
+
+            if (this.time > 2.0) {
+                // Break open
                 this.game.stateMachine.change('genesis');
             }
         }
@@ -139,75 +170,113 @@ export default class IntroState {
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, w, h);
 
-        if (this.phase === 'space' || this.phase === 'entry') {
+        if (this.phase === 'space') {
             // Draw Stars
             ctx.fillStyle = '#fff';
             this.stars.forEach(s => {
                 const k = 128.0 / s.z;
                 const px = s.x * k + cx;
                 const py = s.y * k + cy;
-
                 if (px >= 0 && px <= w && py >= 0 && py <= h) {
-                    const size = (1 - s.z / 2) * 3;
+                    const size = (1 - s.z / 3) * 2;
                     ctx.beginPath();
                     ctx.arc(px, py, Math.max(0.1, size), 0, Math.PI*2);
                     ctx.fill();
                 }
             });
 
-            // Draw Planet
-            if (this.planetScale > 0) {
-                const radius = 50 * Math.pow(this.planetScale, 2);
-                const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-                grad.addColorStop(0, '#000022');
-                grad.addColorStop(0.5, '#0044aa');
-                grad.addColorStop(1, '#0088ff');
-
+            // Draw Planet Growing
+            const scale = Math.pow(this.time, 3) * 0.05;
+            if (scale > 0.1) {
+                const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 100 * scale);
+                grad.addColorStop(0, '#0044aa');
+                grad.addColorStop(1, '#000022');
                 ctx.fillStyle = grad;
                 ctx.beginPath();
-                ctx.arc(cx, cy, radius, 0, Math.PI*2);
+                ctx.arc(cx, cy, 100 * scale, 0, Math.PI*2);
                 ctx.fill();
             }
-        }
 
-        if (this.phase === 'entry') {
-             // Red heat burn overlay
-             ctx.fillStyle = `rgba(255, 100, 0, ${Math.min(0.5, this.time * 0.5)})`;
+            // Draw Comet (Line towards center)
+            const cometDist = 500 - this.time * 100;
+            if (cometDist > 0) {
+                 ctx.strokeStyle = '#fff';
+                 ctx.lineWidth = 2;
+                 ctx.beginPath();
+                 ctx.moveTo(cx, cy);
+                 ctx.lineTo(cx + cometDist, cy - cometDist); // Diagonal
+                 ctx.stroke();
+
+                 // Head
+                 ctx.fillStyle = '#fff';
+                 ctx.beginPath();
+                 ctx.arc(cx + cometDist, cy - cometDist, 3, 0, Math.PI*2);
+                 ctx.fill();
+            }
+        }
+        else if (this.phase === 'entry') {
+             // Red/White noise
+             ctx.fillStyle = `rgba(255, ${Math.random()*255}, ${Math.random()*200}, 1)`;
              ctx.fillRect(0, 0, w, h);
-
-             // Shake
-             ctx.save();
-             ctx.translate((Math.random()-0.5)*20, (Math.random()-0.5)*20);
-             ctx.restore();
         }
-
-        if (this.phase === 'impact') {
-            ctx.fillStyle = `rgba(255, 255, 255, ${this.impactFlash})`;
+        else if (this.phase === 'impact') {
+            const alpha = 1.0 - (this.time * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
             ctx.fillRect(0, 0, w, h);
         }
-
-        if (this.phase === 'submerged') {
-            // Deep Blue
+        else if (this.phase === 'sink' || this.phase === 'awaken') {
+            // Abyss Gradient
             const grad = ctx.createLinearGradient(0, 0, 0, h);
             grad.addColorStop(0, '#000011');
             grad.addColorStop(1, '#001133');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, w, h);
 
-            // Bubbles
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-            this.bubbles.forEach(b => {
+            this.game.camera.apply(ctx);
+
+            // Draw Shard
+            if (this.shard) {
+                // Glow if hot
+                if (this.shard.heat > 0) {
+                    ctx.shadowColor = '#ff4400';
+                    ctx.shadowBlur = 20 * this.shard.heat;
+                    ctx.fillStyle = `rgba(50, 20, 20, 1)`;
+                } else {
+                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = '#222';
+                }
+
+                // If awaken, blue glow cracks
+                if (this.phase === 'awaken') {
+                     ctx.shadowColor = '#00ffff';
+                     ctx.shadowBlur = 20 * this.time;
+                     ctx.strokeStyle = '#00ffff';
+                     ctx.lineWidth = 2;
+                }
+
                 ctx.beginPath();
-                ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+                // Irregular rock shape
+                const r = this.shard.r;
+                ctx.moveTo(this.shard.x - r, this.shard.y - r);
+                ctx.lineTo(this.shard.x + r, this.shard.y - r + 5);
+                ctx.lineTo(this.shard.x + r - 5, this.shard.y + r);
+                ctx.lineTo(this.shard.x - r + 5, this.shard.y + r - 5);
+                ctx.closePath();
+                ctx.fill();
+                if (this.phase === 'awaken') ctx.stroke();
+
+                ctx.shadowBlur = 0;
+            }
+
+            // Draw other particles
+            ctx.fillStyle = '#444';
+            this.particles.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
                 ctx.fill();
             });
 
-            // Text: "PHASE 1: THE AWAKENING"
-            if (this.time > 1.0) {
-                // Fade in DOM text
-                const alpha = Math.min(1, (this.time - 1.0));
-                this.titleOverlay.style.color = `rgba(0, 255, 255, ${alpha})`;
-            }
+            this.game.camera.restore(ctx);
         }
     }
 }

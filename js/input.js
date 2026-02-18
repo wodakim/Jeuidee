@@ -19,12 +19,23 @@ export default class Input {
     setupListeners() {
         const target = window;
 
+        const isUI = (e) => {
+            return e.target.tagName === 'BUTTON' ||
+                   e.target.closest('button') ||
+                   e.target.closest('.ui-element') ||
+                   e.target.closest('#editor-overlay') ||
+                   e.target.id === 'pause-menu';
+        };
+
         target.addEventListener('touchstart', (e) => {
+            if (isUI(e)) return;
+            // Prevent default only on canvas to stop scrolling
             if(e.target.tagName === 'CANVAS') e.preventDefault();
             this.handleStart(e.touches[0].clientX, e.touches[0].clientY);
         }, { passive: false });
 
         target.addEventListener('touchmove', (e) => {
+            if (!this.active) return;
             if(e.target.tagName === 'CANVAS') e.preventDefault();
             this.handleMove(e.touches[0].clientX, e.touches[0].clientY);
         }, { passive: false });
@@ -33,7 +44,11 @@ export default class Input {
             this.handleEnd();
         });
 
-        target.addEventListener('mousedown', (e) => this.handleStart(e.clientX, e.clientY));
+        target.addEventListener('mousedown', (e) => {
+            if (isUI(e)) return;
+            this.handleStart(e.clientX, e.clientY);
+        });
+
         target.addEventListener('mousemove', (e) => this.handleMove(e.clientX, e.clientY));
         target.addEventListener('mouseup', () => this.handleEnd());
     }
