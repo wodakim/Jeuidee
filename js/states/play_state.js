@@ -1,6 +1,6 @@
 import Physics from '../physics.js';
 import Debris from '../debris.js';
-import Enemy from '../enemy.js'; // Import Enemy
+import Enemy from '../enemy.js';
 
 export default class PlayState {
     constructor(game) {
@@ -9,8 +9,11 @@ export default class PlayState {
         this.paused = false;
 
         // Tier Tracking
-        this.currentTier = 1; // 1=Micro, 2=Mid, 3=Macro
+        this.currentTier = 1;
         this.maxEntities = 15;
+
+        // Apex Predator Timer
+        this.apexTimer = 30.0; // Seconds
     }
 
     enter(params) {
@@ -21,8 +24,6 @@ export default class PlayState {
         } else if (params && params.reset) {
             this.game.resetCreature();
         }
-
-        // Initial Tier Check
         this.calculateTier();
     }
 
@@ -31,9 +32,6 @@ export default class PlayState {
     }
 
     calculateTier() {
-        // Tier 1: Mass < 50
-        // Tier 2: Mass 50 - 500
-        // Tier 3: Mass > 500
         const mass = this.game.creature.gameStats.mass;
         let newTier = 1;
         if (mass >= 500) newTier = 3;
@@ -41,10 +39,6 @@ export default class PlayState {
 
         if (newTier !== this.currentTier) {
             this.currentTier = newTier;
-            // Visual Feedback for Tier Shift?
-            if (this.game.settings.fxEnabled) {
-                // Flash or Screen Shake
-            }
         }
     }
 
@@ -60,23 +54,14 @@ export default class PlayState {
             return;
         }
 
-        // Tier Update
         this.calculateTier();
 
-        // Scale Factor for Rendering/Physics
-        // As Mass increases, scale increases.
-        // Tier 1: Scale 1.0
-        // Tier 2: Scale 0.5 (Zoom out)
-        // Tier 3: Scale 0.2
         const baseScale = Math.sqrt(creature.gameStats.mass / 10);
-
-        // Update Creature Physics Radius
         creature.points.forEach(p => { if(p.baseRadius) p.radius = p.baseRadius * baseScale; });
         creature.constraints.forEach(c => { if(c.baseLength) c.length = c.baseLength * baseScale; });
 
         const head = creature.points[0];
 
-        // Input & Movement
         const inputVec = game.input.getVector();
         const swimForce = (creature.stats.speed + 1000) * baseScale;
         const turnSpeed = creature.stats.turnSpeed * 2.0;
@@ -91,7 +76,6 @@ export default class PlayState {
             game.headAngle += diff * turnSpeed * dt;
         }
 
-        // Dash Ability
         if (game.input.checkDoubleTap()) {
             if (game.progression.isUnlocked('Booster')) {
                 const dashForce = 5000 * baseScale;
@@ -103,21 +87,13 @@ export default class PlayState {
             }
         }
 
-        // Physics Update
         game.physics.update(creature.points, creature.constraints, dt);
-
-        // Background & Entities
         game.updateBackgroundOnly(dt);
-
-        // Spawning & Culling
         this.manageEntities(dt, head, baseScale);
-
-        // Boids
         game.boidManager.update(dt, game.enemies);
 
-        // Mate Update
         if (game.mate) {
-            game.mate.update(dt, head, head.radius); // Mate follows player logic or idle
+            game.mate.update(dt, head, head.radius);
             const dist = Math.hypot(head.x - game.mate.points[0].x, head.y - game.mate.points[0].y);
             if (dist < head.radius + game.mate.points[0].radius + 20) {
                 if (game.settings.audioEnabled) game.audio.playTone(600, 'sine', 1.0);
@@ -125,44 +101,46 @@ export default class PlayState {
             }
         }
 
-        // Allies Update
         for (let i = game.allies.length - 1; i >= 0; i--) {
              const ally = game.allies[i];
              ally.update(dt, game.enemies, head);
              Physics.checkSoftBodyCollision(creature.points, ally.points);
-             // ... Ally Combat (Keep existing logic if needed, simplified for brevity here) ...
-             // Let's keep it minimal for now to focus on Tiers.
         }
 
         game.skillManager.update(dt);
         game.distortion.update(dt);
         game.sonar.update(dt);
 
-        // Enemy Interactions
         for (let i = game.enemies.length - 1; i >= 0; i--) {
             const e = game.enemies[i];
-            e.update(dt, head, creature.gameStats.mass); // Pass player head AND MASS for AI
+            e.update(dt, head, creature.gameStats.mass);
 
             Physics.checkSoftBodyCollision(creature.points, e.points);
-            const result = game.resolveCombat(creature, e);
+            const result = this.resolveCombat(creature, e);
 
             if (result.hit) {
                 if (result.playerHit) {
-                     const dmg = Math.max(0, e.stats.damage - creature.stats.defense);
+                     const impact = result.impulse || 0;
+                     const velocityDmg = Math.min(20, impact * 0.05);
+                     const dmg = Math.max(0, e.stats.damage + velocityDmg - creature.stats.defense);
                      creature.gameStats.health -= dmg;
                      creature.lastDamageTime = Date.now();
                      if (dmg > 0 && navigator.vibrate) navigator.vibrate(100);
+
                      const angle = Math.atan2(head.y - e.points[0].y, head.x - e.points[0].x);
                      head.vx += Math.cos(angle) * 500; head.vy += Math.sin(angle) * 500;
                 }
                 if (result.enemyHit) {
-                     const dmg = Math.max(0, creature.stats.damage - e.stats.defense);
+                     const impact = result.impulse || 0;
+                     const velocityDmg = Math.min(20, impact * 0.05);
+                     const dmg = Math.max(0, creature.stats.damage + velocityDmg - e.stats.defense);
                      e.health -= dmg;
                      if(e.onHit) e.onHit();
+
                      const angle = Math.atan2(e.points[0].y - head.y, e.points[0].x - head.x);
                      e.points[0].vx += Math.cos(angle) * 500; e.points[0].vy += Math.sin(angle) * 500;
                 }
-                // Feedback
+
                 game.hitstop = 0.05;
                 const mx = (head.x + e.points[0].x) / 2;
                 const my = (head.y + e.points[0].y) / 2;
@@ -171,7 +149,6 @@ export default class PlayState {
                 if(game.settings.audioEnabled) game.audio.playTone(100, 'sawtooth', 0.1, mx, my, game.camera);
 
                 if (e.health <= 0) {
-                     // Death
                      game.spawnParticles(mx, my, '#ffaa00', 10, 400);
                      game.spawnMeat(mx, my, 3 + Math.floor(e.scale));
                      game.debris.push(new Debris(e.points, e.constraints, e.color, 4));
@@ -185,29 +162,45 @@ export default class PlayState {
             }
         }
 
-        // Food Logic
+        const hasJaws = creature.parts.some(p => p.type === 'Jaws');
+        const hasFilter = creature.parts.some(p => p.type === 'FilterMouth');
+        const isCarnivore = hasJaws;
+        const isHerbivore = hasFilter || !hasJaws;
+
         for (let i = game.food.length - 1; i >= 0; i--) {
             const f = game.food[i];
             const dist = Math.hypot(head.x - f.x, head.y - f.y);
             if (dist < head.radius + f.radius) {
-                game.food.splice(i, 1);
-                const dnaValue = f.dnaValue || 0.2;
-                creature.gameStats.dna += dnaValue;
-                creature.gameStats.mass += 0.5 * dnaValue;
-                creature.gameStats.health = Math.min(creature.gameStats.maxHealth, creature.gameStats.health + 5);
-                if(game.settings.audioEnabled) game.audio.playEat(f.x, f.y, game.camera);
-                if(navigator.vibrate) navigator.vibrate(20);
-                game.spawnParticles(f.x, f.y, f.color, 5, 100);
+                let canEat = false;
+                if (f.type === 'meat' && isCarnivore) canEat = true;
+                if (f.type !== 'meat' && isHerbivore) canEat = true;
+
+                if (canEat) {
+                    game.food.splice(i, 1);
+                    const dnaValue = f.dnaValue || 0.2;
+                    // Reduced growth speed (Balance)
+                    creature.gameStats.dna += dnaValue * 0.5; // Half DNA gain
+                    creature.gameStats.mass += 0.2 * dnaValue; // Slower mass gain
+                    creature.gameStats.health = Math.min(creature.gameStats.maxHealth, creature.gameStats.health + 5);
+                    if(game.settings.audioEnabled) game.audio.playEat(f.x, f.y, game.camera);
+                    if(navigator.vibrate) navigator.vibrate(20);
+                    game.spawnParticles(f.x, f.y, f.color, 5, 100);
+                }
             }
         }
 
-        // Camera Update with Scale Smoothing
-        game.camera.update(head.x, head.y, head.vx, head.vy, dt, creature.gameStats.mass);
+        if (game.food.length < 50) {
+            game.spawnFood(10);
+        }
 
-        // Biome Update
+        const sonarBtn = document.getElementById('sonar-btn');
+        if (sonarBtn) {
+            sonarBtn.style.opacity = (creature.gameStats.dna >= 10) ? 1.0 : 0.3;
+        }
+
+        game.camera.update(head.x, head.y, head.vx, head.vy, dt, creature.gameStats.mass);
         game.biomeManager.update(dt, creature);
 
-        // Debris & Particles Cleanup
         for (let i = game.debris.length - 1; i >= 0; i--) {
             const d = game.debris[i];
             d.update(dt, game.physics);
@@ -223,99 +216,147 @@ export default class PlayState {
     manageEntities(dt, playerHead, playerScale) {
         const game = this.game;
 
-        // 1. Despawn Logic (Culling) based on Tier and Distance
-        const despawnDist = 3000 * playerScale; // Keep distance relative to scale
+        // --- Apex Predator Logic ---
+        this.apexTimer -= dt;
+        if (this.apexTimer <= 0) {
+            this.apexTimer = 30.0; // Reset
+            // Spawn Apex Hunter (Tier + 1 or just big)
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 1200 * playerScale;
+            const x = playerHead.x + Math.cos(angle) * dist;
+            const y = playerHead.y + Math.sin(angle) * dist;
+
+            const apex = new Enemy(x, y, (this.currentTier + 1) * 3, game.physics, 'hunter');
+            apex.scale = (this.currentTier + 1) * 1.5; // Bigger
+            apex.color = '#ff0000'; // Threat
+            apex.state = 'chase'; // Force aggro
+            apex.health = 100 * this.currentTier;
+            // Force Weapon
+            apex.parts.push({type: 'Jaws', boneIndex: 0, side: 0});
+            game.enemies.push(apex);
+
+            // Warning
+            game.distortion.addShockwave(x, y);
+            const warning = document.createElement('div');
+            warning.style = "position:absolute; top:20%; width:100%; text-align:center; color:red; font-family:Orbitron; animation:pulse 1s infinite;";
+            warning.innerText = "APEX PREDATOR DETECTED";
+            document.body.appendChild(warning);
+            setTimeout(() => warning.remove(), 3000);
+        }
+
+        const cam = game.camera;
+        const viewRadiusW = (game.width / 2) / cam.zoom;
+        const viewRadiusH = (game.height / 2) / cam.zoom;
+        const viewRadius = Math.max(viewRadiusW, viewRadiusH);
+
+        const spawnMin = viewRadius + 100;
+        const spawnMax = spawnMin + 500;
+        const despawnDist = spawnMax + 200;
 
         for (let i = game.enemies.length - 1; i >= 0; i--) {
             const e = game.enemies[i];
             const dist = Math.hypot(playerHead.x - e.points[0].x, playerHead.y - e.points[0].y);
 
-            // Distance Check
             if (dist > despawnDist && e.bossType !== 'Leviathan') {
                 game.enemies.splice(i, 1);
                 continue;
             }
-
-            // Tier Culling: Remove if enemy is too small (2 Tiers below)
-            // Or if Tier 1 and player is Tier 3.
             if (e.tier < this.currentTier - 1) {
-                // Convert to background particle?
-                // Just remove for performance for now.
                 game.enemies.splice(i, 1);
             }
         }
 
-        // 2. Spawn Logic
-        // Cap entity count strict
         if (game.enemies.length >= this.maxEntities) return;
-
-        // Spawn probability
-        if (Math.random() > 0.05) return; // Limit spawn rate
-
-        // Spawn Distance: Outside camera view but inside despawn range
-        // Camera View Width approx: game.width / camera.zoom
-        // Zoom is approx 1/playerScale roughly (managed by camera)
-        // Let's use playerScale to estimate spawn ring.
-        const spawnMin = 1000 * playerScale;
-        const spawnMax = 2000 * playerScale;
+        if (Math.random() > 0.05) return;
 
         const angle = Math.random() * Math.PI * 2;
         const dist = spawnMin + Math.random() * (spawnMax - spawnMin);
         const x = playerHead.x + Math.cos(angle) * dist;
         const y = playerHead.y + Math.sin(angle) * dist;
 
-        // Determine Enemy Tier to Spawn
-        // Mostly spawn current Tier, some lower Tier (food), rare higher Tier (threat)
         let spawnTier = this.currentTier;
         const r = Math.random();
         if (r < 0.6) spawnTier = this.currentTier;
-        else if (r < 0.9 && this.currentTier > 1) spawnTier = this.currentTier - 1; // Food
-        else if (r < 1.0) spawnTier = this.currentTier + 1; // Apex Predator
+        else if (r < 0.9 && this.currentTier > 1) spawnTier = this.currentTier - 1;
+        else if (r < 1.0) spawnTier = this.currentTier + 1;
 
-        // Cap Spawn Tier
         if (spawnTier > 3) spawnTier = 3;
 
-        // Shoal Logic
-        // Grazers spawn in groups
         const type = Math.random() > 0.5 ? 'grazer' : 'hunter';
 
         if (type === 'grazer') {
             const count = 3 + Math.floor(Math.random() * 3);
             if (game.enemies.length + count > this.maxEntities) return;
-
             const flock = game.boidManager.createFlock(x, y, count, spawnTier, 'grazer');
-            // Assign Tier
             flock.forEach(e => {
-                e.tier = spawnTier;
-                e.scale = spawnTier; // Visual scale matches tier
-                // Adjust stats for tier
-                e.health *= spawnTier;
-                e.stats.damage *= spawnTier;
-                // Tint based on tier?
+                e.tier = spawnTier; e.scale = spawnTier;
+                e.health *= spawnTier; e.stats.damage *= spawnTier;
             });
             game.enemies.push(...flock);
         } else {
-            const e = new Enemy(x, y, spawnTier * 2, game.physics, 'hunter'); // Difficulty scales with Tier
-            e.tier = spawnTier;
-            e.scale = spawnTier;
-            e.health *= spawnTier;
-            e.stats.damage *= spawnTier;
+            const e = new Enemy(x, y, spawnTier * 2, game.physics, 'hunter');
+            e.tier = spawnTier; e.scale = spawnTier;
+            e.health *= spawnTier; e.stats.damage *= spawnTier;
             game.enemies.push(e);
         }
     }
 
+    resolveCombat(player, enemy) {
+        let result = { hit: false, playerHit: false, enemyHit: false, impulse: 0 };
+
+        const weaponParts = player.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws' || p.type === 'Poison');
+        for (let part of weaponParts) {
+            const bone = player.points[part.boneIndex];
+            if (!bone) continue;
+            const range = bone.radius + 20;
+
+            for (let ePoint of enemy.points) {
+                const dist = Math.hypot(bone.x - ePoint.x, bone.y - ePoint.y);
+                if (dist < range + ePoint.radius) {
+                    result.hit = true;
+                    result.enemyHit = true;
+                    // Calculate Impulse
+                    const relVx = (bone.vx || 0) - (ePoint.vx || 0);
+                    const relVy = (bone.vy || 0) - (ePoint.vy || 0);
+                    result.impulse = Math.hypot(relVx, relVy);
+                    break;
+                }
+            }
+            if (result.enemyHit) break;
+        }
+
+        const enemyWeapons = enemy.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws');
+        for (let part of enemyWeapons) {
+            const bone = enemy.points[part.boneIndex];
+            if (!bone) continue;
+            const range = bone.radius + 20;
+
+            for (let pPoint of player.points) {
+                const dist = Math.hypot(bone.x - pPoint.x, bone.y - pPoint.y);
+                if (dist < range + pPoint.radius) {
+                    result.hit = true;
+                    result.playerHit = true;
+                    const relVx = (bone.vx || 0) - (pPoint.vx || 0);
+                    const relVy = (bone.vy || 0) - (pPoint.vy || 0);
+                    result.impulse = Math.hypot(relVx, relVy);
+                    break;
+                }
+            }
+            if (result.playerHit) break;
+        }
+
+        return result;
+    }
+
     render(ctx) {
-        // ... Render logic is same as before, calling game.render ...
-        // Re-implementing simplified render for PlayState to ensure context
+        if (this.game.editor.active) {
+            this.game.editor.render(ctx);
+            return;
+        }
+
         const game = this.game;
-
-        // Delegate to GameLoop render helpers if possible or replicate
-        // We'll call the standard rendering pipeline
-
-        // Lighting
         if (game.settings.fxEnabled) game.lighting.update(game.camera, { player: game.creature, enemies: game.enemies, food: game.food });
 
-        // Background
         const head = game.creature.points[0];
         const biome = game.biomeManager.getCurrentBiome(head ? head.x : 0, head ? head.y : 0);
         const bgGrad = ctx.createLinearGradient(0, 0, 0, game.height);
@@ -323,10 +364,8 @@ export default class PlayState {
         bgGrad.addColorStop(1, biome.color);
         ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, game.width, game.height);
 
-        // 3-Layer Parallax Rendering (New Requirement)
         this.renderParallax(ctx);
 
-        // Entities
         game.camera.apply(ctx);
         if(game.settings.fxEnabled) ctx.globalCompositeOperation = 'lighter';
         game.food.forEach(f => {
@@ -341,9 +380,7 @@ export default class PlayState {
         });
         ctx.globalAlpha = 1.0;
 
-        // Fog for High Tier Entities (if they are far/big)
         game.enemies.forEach(e => {
-            // If enemy is higher tier, maybe fade it in?
             e.render(ctx);
         });
 
@@ -351,7 +388,6 @@ export default class PlayState {
         game.renderer.drawCreature(game.creature, game.headAngle);
         game.camera.restore(ctx);
 
-        // PostFX
         game.lighting.render(ctx);
         game.distortion.render(ctx, game.camera);
         game.sonar.render(ctx, game.camera);
@@ -365,41 +401,30 @@ export default class PlayState {
         const cx = game.width / 2;
         const cy = game.height / 2;
 
-        // Layer 1: Deep Background (Moves very slowly)
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.scale(1.0, 1.0); // Static scale? Or slight zoom?
-        // Parallax offset
+        ctx.scale(1.0, 1.0);
         ctx.translate(-cam.x * 0.05, -cam.y * 0.05);
-
-        // Draw Deep Particles/Stars
         ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
         game.bgDeep.forEach(p => {
             ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
         });
         ctx.restore();
 
-        // Layer 2: Mid-Ground (Blurred Plankton) - Moves medium speed
         ctx.save();
         ctx.translate(cx, cy);
-        // Scale with inverse camera zoom to keep them somewhat constant or let them zoom?
-        // "Cam zoom backs out". If we scale this layer less, it feels further.
         ctx.scale(cam.zoom * 0.5, cam.zoom * 0.5);
         ctx.translate(-cam.x * 0.2, -cam.y * 0.2);
-
         ctx.fillStyle = 'rgba(100, 255, 255, 0.1)';
-        // Blur effect simulation (draw larger, lower alpha)
         game.bgMid.forEach(p => {
             ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 2, 0, Math.PI*2); ctx.fill();
         });
         ctx.restore();
 
-        // Layer 3: Foreground (Passed by camera) - handled by standard camera apply usually
-        // But if we want foreground overlay:
         ctx.save();
         ctx.translate(cx, cy);
         ctx.scale(cam.zoom * 1.5, cam.zoom * 1.5);
-        ctx.translate(-cam.x * 1.5, -cam.y * 1.5); // Moves faster than camera
+        ctx.translate(-cam.x * 1.5, -cam.y * 1.5);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
         game.bgFore.forEach(p => {
             ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3, 0, Math.PI*2); ctx.fill();
@@ -412,33 +437,20 @@ export default class PlayState {
         const dna = Math.floor(game.creature.gameStats.dna);
         const w = game.width;
 
-        // Blueprint Style HUD
         ctx.save();
-
-        // Top Bar Background
         ctx.fillStyle = 'rgba(0, 10, 30, 0.8)';
         ctx.fillRect(0, 0, w, 60);
-
-        // Bottom Line
         ctx.beginPath();
         ctx.moveTo(0, 60); ctx.lineTo(w, 60);
         ctx.strokeStyle = '#00aaff';
         ctx.lineWidth = 1;
         ctx.stroke();
-
-        // DNA Display
         ctx.fillStyle = '#00aaff';
         ctx.font = '20px Orbitron';
         ctx.textAlign = 'left';
         ctx.fillText(`DNA-SEQUENCE: ${dna}`, 20, 38);
-
-        // Tier Indicator
         ctx.textAlign = 'right';
         ctx.fillText(`TIER: ${this.currentTier}`, w - 20, 38);
-
-        // Sonar Button (if not DOM) - It is DOM in GameLoop createUI
-        // We just style it in DOM.
-
         ctx.restore();
     }
 }

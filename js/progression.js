@@ -15,9 +15,16 @@ const PARTS_DB = {
     },
     'Jaws': {
         name: 'Carnivore Jaw',
-        desc: 'Frontal weapon. High damage.',
+        desc: 'Frontal weapon. EATS MEAT.',
         stat: '++ Damage',
         unlocked: true, // Default
+        cost: 50
+    },
+    'FilterMouth': {
+        name: 'Filter Mouth',
+        desc: 'Filters plancton. EATS PLANTS.',
+        stat: '+ Efficiency',
+        unlocked: true, // Default unlocked for choice
         cost: 50
     },
     'Eye': {
@@ -60,7 +67,7 @@ const PARTS_DB = {
 export default class Progression {
     constructor(saveManager) {
         this.saveManager = saveManager;
-        this.unlocked = ['Fin', 'Spike', 'Eye']; // Start with basics
+        this.unlocked = ['Fin', 'Spike', 'Eye', 'Jaws', 'FilterMouth']; // Start with basics
         this.load();
     }
 
