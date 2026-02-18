@@ -20,6 +20,7 @@ def bundle():
         'js/ik.js',
         'js/lighting.js',
         'js/biomes.js',
+        'js/background.js', # Added
         'js/legacy.js',
         'js/social.js',
         'js/editor.js',
@@ -34,6 +35,8 @@ def bundle():
         'js/states/gameover_state.js',
         'js/states/intro.js',
         'js/states/genesis_state.js',
+        'js/states/brain.js', # Added
+        'js/states/emergence.js', # Added
         'js/gameloop.js'
     ]
 

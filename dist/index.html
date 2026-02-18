@@ -259,125 +259,221 @@ class AudioSystem {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.value = 0.5;
+        this.masterGain.gain.value = 0.6;
         this.masterGain.connect(this.ctx.destination);
 
-        // Reverb / Echo
+        // --- FX CHAIN ---
+        // 1. Reverb (Convolver) - Generates "Space"
+        this.reverb = this.ctx.createConvolver();
+        this.reverb.buffer = this.createImpulseResponse(3.0, 2.0); // 3s decay
+        this.reverbGain = this.ctx.createGain();
+        this.reverbGain.gain.value = 0.4; // Wet mix
+
+        // 2. Delay (Echo) - Generates "Distance"
         this.delay = this.ctx.createDelay();
-        this.delay.delayTime.value = 0.1; // 100ms echo
+        this.delay.delayTime.value = 0.5;
         this.delayFeedback = this.ctx.createGain();
         this.delayFeedback.gain.value = 0.4;
+
+        // Filter feedback to simulate absorption
         this.delayFilter = this.ctx.createBiquadFilter();
         this.delayFilter.type = 'lowpass';
-        this.delayFilter.frequency.value = 1000; // Dampen echo
+        this.delayFilter.frequency.value = 800;
 
-        // Routing: Input -> Delay -> Feedback -> Input
         this.delay.connect(this.delayFeedback);
         this.delayFeedback.connect(this.delayFilter);
         this.delayFilter.connect(this.delay);
 
-        // Connect Delay to Master (Wet Mix)
-        this.delay.connect(this.masterGain);
+        // Master FX Bus
+        this.delay.connect(this.reverb);
+        this.reverb.connect(this.masterGain);
+        this.delay.connect(this.masterGain); // Dry echo
 
-        // Ambience
-        this.droneOsc = null;
-        this.startDrone();
+        // --- MUSIC GENERATOR ---
+        this.scale = [196.00, 220.00, 261.63, 293.66, 329.63, 392.00, 440.00, 523.25]; // G Major Pentatonic approx (G, A, C, D, E)
+        // Or deeper: C Minor Pentatonic: C2, Eb2, F2, G2, Bb2
+        this.deepScale = [65.41, 77.78, 87.31, 98.00, 116.54, 130.81]; // Low C Minor
+
+        this.nextNoteTime = 0;
+        this.isPlaying = false;
+
+        // Start Loop
+        this.scheduleNextNote();
+    }
+
+    createImpulseResponse(duration, decay) {
+        const rate = this.ctx.sampleRate;
+        const length = rate * duration;
+        const impulse = this.ctx.createBuffer(2, length, rate);
+        const left = impulse.getChannelData(0);
+        const right = impulse.getChannelData(1);
+
+        for (let i = 0; i < length; i++) {
+            // White noise with exponential decay
+            const n = i / length;
+            const env = Math.pow(1 - n, decay);
+            left[i] = (Math.random() * 2 - 1) * env;
+            right[i] = (Math.random() * 2 - 1) * env;
+        }
+        return impulse;
     }
 
     resume() {
         if (this.ctx.state === 'suspended') {
             this.ctx.resume();
         }
+        this.isPlaying = true;
+    }
+
+    scheduleNextNote() {
+        if (!this.isPlaying) {
+             requestAnimationFrame(() => this.scheduleNextNote());
+             return;
+        }
+
+        const now = this.ctx.currentTime;
+        if (now >= this.nextNoteTime) {
+            // Play a note
+            this.playProceduralNote();
+            // Schedule next (Random interval 2s - 6s)
+            this.nextNoteTime = now + 2 + Math.random() * 4;
+        }
+        requestAnimationFrame(() => this.scheduleNextNote());
+    }
+
+    playProceduralNote() {
+        // Pick random note from Deep Scale
+        const freq = this.deepScale[Math.floor(Math.random() * this.deepScale.length)];
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = Math.random() > 0.5 ? 'sine' : 'triangle';
+        osc.frequency.value = freq;
+
+        // Random Detune for "organic" feel
+        osc.detune.value = (Math.random() - 0.5) * 20;
+
+        // Envelope (Pad style: Slow attack, long release)
+        const attack = 2 + Math.random() * 2;
+        const release = 4 + Math.random() * 4;
+        const now = this.ctx.currentTime;
+
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.1, now + attack); // Quiet volume
+        gain.gain.exponentialRampToValueAtTime(0.001, now + attack + release);
+
+        // Connections
+        osc.connect(gain);
+        gain.connect(this.reverb); // Send to reverb
+        gain.connect(this.delay); // Send to delay
+
+        osc.start(now);
+        osc.stop(now + attack + release + 1);
     }
 
     startAmbient() {
+        this.resume();
         if (!this.droneOsc) {
-            this.startDrone();
+            // Deep Drone
+            const osc = this.ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = 32.70; // C1 (Deep Sub)
+
+            const gain = this.ctx.createGain();
+            gain.gain.value = 0.2;
+
+            // LFO for movement
+            const lfo = this.ctx.createOscillator();
+            lfo.frequency.value = 0.1; // Very slow
+            const lfoGain = this.ctx.createGain();
+            lfoGain.gain.value = 10; // +/- 10Hz modulation? No, maybe amplitude.
+            // Let's modulate filter instead? Or just gain.
+
+            // Amplitude Modulation
+            const ampLfo = this.ctx.createOscillator();
+            ampLfo.frequency.value = 0.05;
+            const ampGain = this.ctx.createGain();
+            ampGain.gain.value = 0.1;
+
+            ampLfo.connect(ampGain);
+            ampGain.connect(gain.gain);
+
+            osc.connect(gain);
+            gain.connect(this.masterGain); // Direct sub bass
+
+            osc.start();
+            lfo.start();
+            ampLfo.start();
+
+            this.droneOsc = osc;
         }
     }
 
-    startDrone() {
-        // Deep Sea Drone (Low sine + modulation)
-        const osc = this.ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.value = 15;
+    playTone(freq, type, duration = 0.1, x = 0, y = 0, camera = null) {
+        if (this.ctx.state === 'suspended') return;
 
-        const mod = this.ctx.createOscillator();
-        mod.type = 'sine';
-        mod.frequency.value = 0.05; // Slow throb
-
-        const modGain = this.ctx.createGain();
-        modGain.gain.value = 20;
-
-        mod.connect(modGain);
-        modGain.connect(osc.frequency);
-
-        const gain = this.ctx.createGain();
-        gain.gain.value = 0.1; // Quiet
-
-        osc.connect(gain);
-        gain.connect(this.masterGain); // Direct to master, no reverb for clean bass
-
-        osc.start();
-        mod.start();
-
-        this.droneOsc = { osc, mod, gain };
-    }
-
-    playTone(freq, type, duration, x = 0, y = 0, camera = null) {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         const panner = this.ctx.createStereoPanner();
 
-        // Spatial Audio Logic
         if (camera) {
-            // Screen width is roughly camera.viewportWidth / camera.zoom
-            // Let's approximate. Center is camera.x, camera.y
-            const relX = (x - camera.x);
-            // Normalize roughly. View width varies.
-            // Let's assume view width ~1000 world units at zoom 1
-            const pan = Math.max(-1, Math.min(1, relX / (500 / camera.zoom)));
+            // Normalize X (-1 to 1) based on screen position
+            const screenX = (x - camera.x) * camera.zoom;
+            // Visible width approx game.width/2
+            const pan = Math.max(-1, Math.min(1, screenX / (window.innerWidth/2)));
             panner.pan.value = pan;
         }
 
         osc.type = type;
-        osc.frequency.value = freq;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        // Pitch slide for "liquid" feel?
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.8, this.ctx.currentTime + duration);
 
         osc.connect(gain);
         gain.connect(panner);
         panner.connect(this.masterGain);
-        panner.connect(this.delay); // Send to reverb
+        panner.connect(this.reverb); // Send FX
 
         const now = this.ctx.currentTime;
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
         osc.start(now);
         osc.stop(now + duration);
     }
 
-    playEat(x, y, camera) {
-        this.playTone(300 + Math.random() * 200, 'triangle', 0.1, x, y, camera);
-        this.playTone(500 + Math.random() * 200, 'sine', 0.15, x, y, camera);
+    playEat() {
+        // High pitched "bloop"
+        this.playTone(800 + Math.random()*200, 'sine', 0.1);
     }
 
     playDash() {
-        // White noise burst for dash?
-        // Simple sweep
-        const osc = this.ctx.createOscillator();
+        // Filtered Noise Burst
+        const bufferSize = this.ctx.sampleRate * 0.5;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 500;
+
         const gain = this.ctx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(100, this.ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.3);
+        gain.gain.value = 0.2;
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
 
-        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
-
-        osc.connect(gain);
+        noise.connect(filter);
+        filter.connect(gain);
         gain.connect(this.masterGain);
+        gain.connect(this.reverb);
 
-        osc.start();
-        osc.stop(this.ctx.currentTime + 0.3);
+        noise.start();
     }
 }
 
@@ -560,14 +656,15 @@ class Camera {
         this.y = 0;
         this.zoom = 1;
         this.targetZoom = 1;
+        this.vx = 0;
+        this.vy = 0;
 
         this.viewportWidth = width;
         this.viewportHeight = height;
 
         // Settings
-        this.followStrength = 0.05; // Lerp factor (lower = smoother/lazier)
-        this.lookAhead = 100; // How far to look ahead based on velocity
-        this.baseZoom = 0.7; // Default "Far" zoom for gameplay (was 1.0)
+        this.followStrength = 0.05;
+        this.baseZoom = 0.8;
     }
 
     resize(w, h) {
@@ -577,38 +674,45 @@ class Camera {
 
     update(targetX, targetY, targetVx, targetVy, dt, playerMass = 10) {
         // 1. Calculate Target Position (Center on player + Lookahead)
-        const idealX = targetX + targetVx * 0.5; // Lookahead
+        const idealX = targetX + targetVx * 0.5;
         const idealY = targetY + targetVy * 0.5;
 
-        // 2. Smoothly interpolate current camera position towards ideal
-        this.x += (idealX - this.x) * this.followStrength;
-        this.y += (idealY - this.y) * this.followStrength;
+        // Smooth Camera Movement
+        const dx = idealX - this.x;
+        const dy = idealY - this.y;
+        this.x += dx * this.followStrength;
+        this.y += dy * this.followStrength;
 
-        // 3. Zoom Logic (Dynamic based on Mass and Speed)
-        // Base scale inverse to mass
-        // Mass 10 -> Scale 1.0
-        // Mass 100 -> Scale 3.16 -> Zoom ~0.3
+        // Track Velocity for Parallax
+        this.vx = dx * this.followStrength / dt;
+        this.vy = dy * this.followStrength / dt;
 
-        const playerScale = Math.sqrt(playerMass / 10);
+        // 2. Infinite Zoom Logic
+        // We want the player to maintain roughly constant screen size.
+        // Player Radius ~ sqrt(Mass) * constant
+        // Screen Radius = World Radius * Zoom
+        // Target Screen Radius ~ 30px (arbitrary nice size)
 
-        // Target Zoom is inverse of player scale, but clamped
-        // Zoom out as player gets bigger to keep view consistent relative to player size
-        const massZoom = this.baseZoom / Math.max(1, playerScale * 0.8);
+        // World Radius approx = Math.sqrt(playerMass / 10) * 20
+        // Zoom = Target Screen Radius / World Radius
 
-        // Also zoom out slightly with speed
+        const worldRadius = Math.sqrt(playerMass / 10) * 20;
+        let idealZoom = 40 / Math.max(20, worldRadius); // 40px target size
+
+        // Speed Factor: Zoom out slightly when fast
         const speed = Math.hypot(targetVx, targetVy);
-        const speedFactor = Math.min(speed / 1000, 1);
-        const speedZoomMod = 1 - (speedFactor * 0.2);
+        const speedFactor = Math.min(speed / 2000, 1.0);
+        idealZoom *= (1.0 - speedFactor * 0.3);
 
-        this.targetZoom = massZoom * speedZoomMod;
+        this.targetZoom = idealZoom;
 
-        // Clamp min zoom to avoid seeing edge of world if we had one (but world is infinite parallax)
-        this.targetZoom = Math.max(0.1, this.targetZoom);
+        // No Clamp (Infinite Scale) - but safety min to prevent 0
+        this.targetZoom = Math.max(0.0001, this.targetZoom);
 
-        this.zoom += (this.targetZoom - this.zoom) * 0.02; // Slow zoom
+        // Smooth Zoom
+        this.zoom += (this.targetZoom - this.zoom) * 0.05;
     }
 
-    // Convert World Point to Screen Point
     worldToScreen(wx, wy) {
         return {
             x: (wx - this.x) * this.zoom + this.viewportWidth / 2,
@@ -616,7 +720,6 @@ class Camera {
         };
     }
 
-    // Convert Screen Point to World Point
     screenToWorld(sx, sy) {
         return {
             x: (sx - this.viewportWidth / 2) / this.zoom + this.x,
@@ -624,7 +727,6 @@ class Camera {
         };
     }
 
-    // Apply transform to Context
     apply(ctx) {
         ctx.save();
         ctx.translate(this.viewportWidth / 2, this.viewportHeight / 2);
@@ -768,48 +870,60 @@ class Renderer {
     }
 
     drawCreature(creature, headAngle = 0) {
-        // Enable Additive Blending for "Bioluminescent" look if enabled
-        if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'lighter';
-
         const points = creature.points;
         let color = creature.color || '#00ffff';
 
-        // Diegetic Health: Modulate color/intensity
+        // Health Mod
         const healthPct = creature.gameStats.health / creature.gameStats.maxHealth;
-
-        // Flash Red on Damage
         if (creature.lastDamageTime && Date.now() - creature.lastDamageTime < 200) {
-            color = '#ff0000';
+            color = '#ff4444'; // Bright Red flash
         } else if (healthPct < 0.3) {
-            // Pulse Red when low
             const pulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
-            color = pulse > 0.5 ? '#ff0000' : color;
+            color = pulse > 0.5 ? '#ff2222' : color;
         }
+
+        // --- ORGANIC MEMBRANE RENDERING ---
+        // Instead of drawing individual circles, we draw the whole body as a connected soft shape?
+        // Actually, for "Cell" look, overlapping soft circles works well if we handle alpha correctly.
+        // We want: Semi-transparent body, bright edge.
+
+        // 1. Draw "Cytoplasm" (Inner Glow)
+        // Use 'lighter' for bioluminescence
+        if (this.settings.fxEnabled) this.ctx.globalCompositeOperation = 'screen';
 
         for (let i = points.length - 1; i >= 0; i--) {
             const p = points[i];
 
-            // Glow intensity based on health
-            const glowSize = 2.5 * (0.5 + 0.5 * healthPct);
-
-            // Glow
-            const grad = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius * glowSize);
-            grad.addColorStop(0, color);
-            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            // Soft Gradient Blob
+            const grad = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.8)'); // Core white
+            grad.addColorStop(0.4, color); // Mid color
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Fade out
 
             this.ctx.fillStyle = grad;
             this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.radius * 2.5, 0, Math.PI * 2);
-            this.ctx.fill();
-
-            // Core
-            this.ctx.fillStyle = 'white'; // White core for brightness
-            this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.radius * 0.6, 0, Math.PI * 2);
+            this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
             this.ctx.fill();
         }
 
-        // Draw Attached Parts
+        // 2. Draw "Membrane" (Outer Rim)
+        // We can draw a connected path around the outer points?
+        // For now, let's keep it simple: Draw larger, faint circles behind?
+        // Or just the soft gradient is enough for the "Microscope" look.
+
+        // Let's add "Nucleus" to the head
+        if (points.length > 0) {
+            const head = points[0];
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            this.ctx.beginPath();
+            // Irregular Nucleus
+            this.ctx.arc(head.x, head.y, head.radius * 0.4, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        this.ctx.globalCompositeOperation = 'source-over';
+
+        // Draw Attached Parts (Organelles)
         if (creature.parts) {
             creature.parts.forEach(part => {
                 const bone = creature.points[part.boneIndex];
@@ -822,7 +936,7 @@ class Renderer {
                     if (part.boneIndex === 0) spineAngle += Math.PI;
                 }
 
-                // Initialize IK for Tentacles if missing
+                // Initialize IK for Tentacles
                 if (part.type === 'Tentacle' && !part.ik) {
                     part.ik = IKSystem.createTentacle(8, 10);
                 }
@@ -830,52 +944,17 @@ class Renderer {
                 this.drawPart(part, bone.x, bone.y, spineAngle, bone.radius, color, headAngle);
             });
         }
-
-        // Reset composite before drawing eyes (eyes should be solid)
-        this.ctx.globalCompositeOperation = 'source-over';
-
-        // Draw Eyes (Head)
-        const head = points[0];
-        const scale = head.radius / (head.baseRadius || 20);
-
-        this.ctx.save();
-        this.ctx.translate(head.x, head.y);
-        this.ctx.rotate(headAngle);
-        this.ctx.scale(scale, scale);
-
-        this.ctx.fillStyle = 'white';
-        this.ctx.beginPath();
-        this.ctx.arc(10, -8, 6, 0, Math.PI*2);
-        this.ctx.arc(10, 8, 6, 0, Math.PI*2);
-        this.ctx.fill();
-        this.ctx.fillStyle = 'black';
-        this.ctx.beginPath();
-        this.ctx.arc(13, -8, 3, 0, Math.PI*2);
-        this.ctx.arc(13, 8, 3, 0, Math.PI*2);
-        this.ctx.fill();
-        this.ctx.restore();
     }
 
     drawPart(part, x, y, spineAngle, radius, bodyColor, headAngle = 0) {
         const type = part.type;
-        const side = part.side;
 
-        // Determine Angle
         let drawAngle = spineAngle;
-
-        // If part has precise angle (from new Editor)
         if (part.angle !== undefined) {
-             // part.angle is the Absolute Angle in the Editor (Spine Down = PI/2)
-             // We need to convert this to an offset relative to the spine.
-             // Editor Spine Angle = Math.PI/2
-             // Offset = part.angle - Math.PI/2
-
-             // However, spineAngle passed here is the CURRENT dynamic angle of the bone segment.
-             // So we apply the offset to the current spineAngle.
              const offset = part.angle - Math.PI/2;
              drawAngle = spineAngle + offset;
         } else {
-             // Legacy
+             const side = part.side;
              let sideAngle = 0;
              if (side === 1) sideAngle = Math.PI/2;
              else if (side === -1) sideAngle = -Math.PI/2;
@@ -883,158 +962,156 @@ class Renderer {
              drawAngle = spineAngle + sideAngle;
         }
 
-        // Special handling for Tentacles (World Space Drawing via IK)
+        // Tentacles (Flagella)
         if (type === 'Tentacle' && part.ik) {
             const rootX = x + Math.cos(drawAngle) * radius;
             const rootY = y + Math.sin(drawAngle) * radius;
-
-            // Update IK
             IKSystem.update(part.ik, rootX, rootY, drawAngle, 0.016);
 
-            // Draw
             this.ctx.save();
-            this.ctx.strokeStyle = '#a0f';
-            this.ctx.lineWidth = Math.max(2, radius * 0.3);
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = '#a0f';
-                this.ctx.shadowBlur = 10;
-            }
-
+            // Organic Tentacle: Tapered width, soft color
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            this.ctx.lineCap = 'round';
             this.ctx.beginPath();
             const segs = part.ik.segments;
             this.ctx.moveTo(segs[0].x, segs[0].y);
-            for(let i=1; i<segs.length; i++) {
-                this.ctx.lineTo(segs[i].x, segs[i].y);
+
+            // Draw smooth curve through points
+            for(let i=1; i<segs.length - 1; i++) {
+                const xc = (segs[i].x + segs[i+1].x) / 2;
+                const yc = (segs[i].y + segs[i+1].y) / 2;
+                this.ctx.quadraticCurveTo(segs[i].x, segs[i].y, xc, yc);
             }
             this.ctx.stroke();
-            this.ctx.shadowBlur = 0;
 
-            // Bulb
-            const tip = segs[segs.length-1];
-            this.ctx.fillStyle = '#d0f';
-            this.ctx.beginPath();
-            this.ctx.arc(tip.x, tip.y, radius * 0.2, 0, Math.PI*2);
-            this.ctx.fill();
+            // Cilia / Hair on tentacle?
+            // Maybe for V2.
             this.ctx.restore();
             return;
         }
 
-        // Standard Parts (Relative Drawing)
         this.ctx.save();
         this.ctx.translate(x, y);
-
-        // Apply Rotation
         this.ctx.rotate(drawAngle);
 
-        const wobble = Math.sin(Date.now() * 0.005) * 0.1;
+        // Wobble for organic feel
+        const wobble = Math.sin(Date.now() * 0.003 + x * 0.01) * 0.05;
         this.ctx.rotate(wobble);
 
-        this.ctx.translate(radius, 0);
-
-        // Scale Part based on Bone Radius (Base Radius is approx 20)
+        this.ctx.translate(radius * 0.8, 0); // Embed slightly in body
         const scale = Math.max(0.5, radius / 20);
         this.ctx.scale(scale, scale);
 
+        // --- ORGANIC PART DRAWING ---
+
         if (type === 'Fin') {
-            this.ctx.fillStyle = bodyColor;
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = bodyColor;
-                this.ctx.shadowBlur = 20;
-            }
+            // Fin is now a translucent membrane with "rays"
+            this.ctx.fillStyle = 'rgba(100, 255, 255, 0.2)';
+            this.ctx.strokeStyle = 'rgba(100, 255, 255, 0.5)';
+            this.ctx.lineWidth = 1;
+
             this.ctx.beginPath();
             this.ctx.moveTo(0, 0);
-            this.ctx.quadraticCurveTo(15, -15, 40, 0);
-            this.ctx.quadraticCurveTo(15, 15, 0, 0);
+            this.ctx.bezierCurveTo(10, -15, 30, -10, 40, 0);
+            this.ctx.bezierCurveTo(30, 10, 10, 15, 0, 0);
             this.ctx.fill();
-            this.ctx.shadowBlur = 0;
+            this.ctx.stroke();
+
+            // Rays
+            this.ctx.beginPath();
+            this.ctx.moveTo(0,0); this.ctx.lineTo(35, -5);
+            this.ctx.moveTo(0,0); this.ctx.lineTo(40, 0);
+            this.ctx.moveTo(0,0); this.ctx.lineTo(35, 5);
+            this.ctx.stroke();
+
         } else if (type === 'Spike') {
-            this.ctx.fillStyle = '#ff0044';
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = '#f04';
-                this.ctx.shadowBlur = 15;
-            }
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, -8);
-            this.ctx.lineTo(35, 0);
-            this.ctx.lineTo(0, 8);
-            this.ctx.fill();
-            this.ctx.shadowBlur = 0;
-        } else if (type === 'Jaws') {
-            this.ctx.fillStyle = '#eee';
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, -10); this.ctx.lineTo(25, -5); this.ctx.lineTo(0, 0);
-            this.ctx.moveTo(0, 10); this.ctx.lineTo(25, 5); this.ctx.lineTo(0, 0);
-            this.ctx.fill();
-            this.ctx.fillStyle = '#fff';
-            this.ctx.beginPath();
-            this.ctx.moveTo(10, -5); this.ctx.lineTo(15, -2); this.ctx.lineTo(20, -5);
-            this.ctx.moveTo(10, 5); this.ctx.lineTo(15, 2); this.ctx.lineTo(20, 5);
-            this.ctx.fill();
-        } else if (type === 'FilterMouth') {
-            this.ctx.fillStyle = '#4f4';
-            this.ctx.beginPath();
-            // Fan shape
-            this.ctx.arc(0, 0, 20, -Math.PI/3, Math.PI/3);
-            this.ctx.lineTo(0, 0);
-            this.ctx.fill();
-            // Gills lines
-            this.ctx.strokeStyle = '#040';
-            this.ctx.lineWidth = 1;
-            this.ctx.beginPath();
-            for(let i=-2; i<=2; i++) {
-                this.ctx.moveTo(0,0);
-                this.ctx.lineTo(15, i*5);
-            }
-            this.ctx.stroke();
-        } else if (type === 'Eye') {
-            this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
-            this.ctx.fillStyle = 'white';
-            this.ctx.beginPath();
-            this.ctx.arc(12, 0, 6, 0, Math.PI*2);
-            this.ctx.fill();
-            this.ctx.fillStyle = 'black';
-            this.ctx.beginPath();
-            this.ctx.arc(14, 0, 2, 0, Math.PI*2);
-            this.ctx.fill();
-        } else if (type === 'Shield') {
-            this.ctx.fillStyle = '#444';
-            this.ctx.strokeStyle = '#888';
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            this.ctx.arc(0, 0, 20, -Math.PI/2, Math.PI/2);
-            this.ctx.lineTo(0, 0);
-            this.ctx.fill();
-            this.ctx.stroke();
-        } else if (type === 'Booster') {
-            this.ctx.fillStyle = '#555';
+            // Thorn / Calcified
+            const spikeGrad = this.ctx.createLinearGradient(0, 0, 40, 0);
+            spikeGrad.addColorStop(0, '#fff');
+            spikeGrad.addColorStop(1, 'rgba(255, 200, 200, 0.1)');
+
+            this.ctx.fillStyle = spikeGrad;
             this.ctx.beginPath();
             this.ctx.moveTo(0, -5);
-            this.ctx.lineTo(15, -8);
-            this.ctx.lineTo(15, 8);
-            this.ctx.lineTo(0, 5);
+            this.ctx.quadraticCurveTo(10, 0, 40, 0); // Curved point
+            this.ctx.quadraticCurveTo(10, 0, 0, 5);
             this.ctx.fill();
-            if (Math.random() > 0.5) {
-                this.ctx.fillStyle = '#fa0';
+
+        } else if (type === 'Jaws') {
+            // Mandibles
+            this.ctx.fillStyle = '#ddd';
+            // Left Mandible
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, -8);
+            this.ctx.quadraticCurveTo(20, -15, 30, -5); // Curve in
+            this.ctx.quadraticCurveTo(15, -5, 0, -2);
+            this.ctx.fill();
+            // Right Mandible
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, 8);
+            this.ctx.quadraticCurveTo(20, 15, 30, 5);
+            this.ctx.quadraticCurveTo(15, 5, 0, 2);
+            this.ctx.fill();
+
+        } else if (type === 'Eye') {
+            this.ctx.rotate(part.side === 1 ? -Math.PI/2 : Math.PI/2);
+
+            // Sclera
+            this.ctx.fillStyle = '#fff';
+            this.ctx.beginPath();
+            this.ctx.arc(12, 0, 8, 0, Math.PI*2);
+            this.ctx.fill();
+
+            // Iris
+            this.ctx.fillStyle = bodyColor;
+            this.ctx.beginPath();
+            this.ctx.arc(14, 0, 5, 0, Math.PI*2);
+            this.ctx.fill();
+
+            // Pupil
+            this.ctx.fillStyle = '#000';
+            this.ctx.beginPath();
+            this.ctx.arc(15, 0, 2.5, 0, Math.PI*2);
+            this.ctx.fill();
+
+            // Highlight
+            this.ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            this.ctx.beginPath();
+            this.ctx.arc(13, -2, 2, 0, Math.PI*2);
+            this.ctx.fill();
+
+        } else if (type === 'Booster') {
+            // Siphon Jet
+            this.ctx.fillStyle = '#88a';
+            this.ctx.beginPath();
+            this.ctx.ellipse(10, 0, 10, 6, 0, 0, Math.PI*2);
+            this.ctx.fill();
+
+            // Hole
+            this.ctx.fillStyle = '#000';
+            this.ctx.beginPath();
+            this.ctx.arc(20, 0, 3, 0, Math.PI*2);
+            this.ctx.fill();
+
+            // Particles if boosting (can't check state easily here, assume random sputter)
+            if (Math.random() > 0.7) {
+                this.ctx.fillStyle = 'rgba(200, 255, 255, 0.5)';
                 this.ctx.beginPath();
-                this.ctx.moveTo(15, -5);
-                this.ctx.lineTo(25 + Math.random()*10, 0);
-                this.ctx.lineTo(15, 5);
+                this.ctx.arc(25 + Math.random()*10, (Math.random()-0.5)*5, 2, 0, Math.PI*2);
                 this.ctx.fill();
             }
         } else if (type === 'Poison') {
-            this.ctx.fillStyle = '#0f0';
-            if (this.settings.fxEnabled) {
-                this.ctx.shadowColor = '#0f0';
-                this.ctx.shadowBlur = 15;
-            }
-            this.ctx.beginPath();
-            this.ctx.arc(10, 0, 8, 0, Math.PI*2);
-            this.ctx.fill();
-            this.ctx.shadowBlur = 0;
-            this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            this.ctx.beginPath();
-            this.ctx.arc(12 - Math.random()*4, -2 + Math.random()*4, 2, 0, Math.PI*2);
-            this.ctx.fill();
+             // Bubbling Sac
+             this.ctx.fillStyle = 'rgba(50, 255, 50, 0.6)';
+             this.ctx.beginPath();
+             this.ctx.arc(10, 0, 8, 0, Math.PI*2);
+             this.ctx.fill();
+
+             // Internal bubbles
+             this.ctx.fillStyle = 'rgba(200, 255, 200, 0.8)';
+             this.ctx.beginPath();
+             this.ctx.arc(10 + Math.sin(Date.now()*0.005)*3, Math.cos(Date.now()*0.005)*3, 3, 0, Math.PI*2);
+             this.ctx.fill();
         }
 
         this.ctx.restore();
@@ -1247,12 +1324,23 @@ class Input {
     setupListeners() {
         const target = window;
 
+        const isUI = (e) => {
+            return e.target.tagName === 'BUTTON' ||
+                   e.target.closest('button') ||
+                   e.target.closest('.ui-element') ||
+                   e.target.closest('#editor-overlay') ||
+                   e.target.id === 'pause-menu';
+        };
+
         target.addEventListener('touchstart', (e) => {
+            if (isUI(e)) return;
+            // Prevent default only on canvas to stop scrolling
             if(e.target.tagName === 'CANVAS') e.preventDefault();
             this.handleStart(e.touches[0].clientX, e.touches[0].clientY);
         }, { passive: false });
 
         target.addEventListener('touchmove', (e) => {
+            if (!this.active) return;
             if(e.target.tagName === 'CANVAS') e.preventDefault();
             this.handleMove(e.touches[0].clientX, e.touches[0].clientY);
         }, { passive: false });
@@ -1261,7 +1349,11 @@ class Input {
             this.handleEnd();
         });
 
-        target.addEventListener('mousedown', (e) => this.handleStart(e.clientX, e.clientY));
+        target.addEventListener('mousedown', (e) => {
+            if (isUI(e)) return;
+            this.handleStart(e.clientX, e.clientY);
+        });
+
         target.addEventListener('mousemove', (e) => this.handleMove(e.clientX, e.clientY));
         target.addEventListener('mouseup', () => this.handleEnd());
     }
@@ -1319,19 +1411,19 @@ class Input {
 
 
 class Enemy {
-    constructor(x, y, difficulty, physics, type = 'hunter') {
+    constructor(x, y, tier, physics, type = 'hunter') {
         this.physics = physics;
         this.active = true;
-        this.difficulty = difficulty; // 1 to 10+
+        this.tier = tier; // 1, 2, 3...
         this.type = type; // 'hunter', 'grazer', 'titan'
 
-        // AI & Tier Props
-        this.tier = 1; // Default
-        this.mass = 10; // Default approximation
-        this.persistent = false; // Flag to prevent despawning
-
         // Procedural Generation
-        this.scale = 1 + (difficulty * 0.2); // Growth
+        // Scale Factor: Roughly 3x per tier to match Mass 10x (Sqrt(10) ~ 3.16)
+        this.scale = Math.pow(3, this.tier - 1);
+        this.mass = 10 * this.scale * this.scale; // Mass = Scale^2 * 10
+
+        this.persistent = false;
+
         this.color = type === 'grazer' ? `hsl(${100 + Math.random() * 50}, 70%, 50%)` : `hsl(${Math.random() * 360}, 70%, 50%)`;
 
         // Body
@@ -1345,14 +1437,18 @@ class Enemy {
         this.generateParts();
         this.stats.calculate(this.parts);
 
-        // Base stats scaling
-        this.stats.speed = (300 + difficulty * 50) * (type === 'grazer' ? 0.8 : 1.0);
-        this.stats.damage = 5 + difficulty * 2;
-        this.health = (20 + difficulty * 10) * (type === 'titan' ? 5 : 1);
-        this.maxHealth = this.health;
+        // Stats Scaling
+        // Speed shouldn't scale linearly with size, big things move slower relatively?
+        // But in absolute terms faster.
+        // Let's keep speed manageable.
+        this.stats.speed = (200 + this.tier * 50) * (type === 'grazer' ? 0.8 : 1.0);
 
-        // Mass approximation for AI logic
-        this.mass = 10 * this.scale * this.scale;
+        // Damage scales with Mass
+        this.stats.damage = 5 * this.scale;
+
+        // Health scales with Mass
+        this.health = 20 * this.scale * (type === 'titan' ? 5 : 1);
+        this.maxHealth = this.health;
 
         // AI State
         this.state = 'wander';
@@ -1365,45 +1461,49 @@ class Enemy {
     }
 
     createBody(x, y) {
-        const segs = this.type === 'titan' ? 10 : (3 + Math.floor(this.difficulty / 3));
-        const rad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
+        const segs = this.type === 'titan' ? 8 : (3 + Math.floor(this.tier / 2));
+        // Cap segments to avoid physics explosion
+        const actualSegs = Math.min(10, segs);
 
-        for (let i = 0; i < segs; i++) {
-            const p = this.physics.constructor.createPoint(x, y + i * rad, rad * (1 - i*0.1), 1 + this.difficulty * 0.5);
-            p.baseRadius = rad * (1 - i*0.1);
+        const baseRad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
+
+        for (let i = 0; i < actualSegs; i++) {
+            // Taper body
+            const r = baseRad * (1 - i * 0.1);
+            const p = this.physics.constructor.createPoint(x, y + i * baseRad, r, this.scale); // Mass scaled
+            p.baseRadius = r;
+            p.radius = r; // Important for renderer
             this.points.push(p);
 
             if (i > 0) {
                 const prev = this.points[i-1];
-                this.constraints.push(this.physics.constructor.createConstraint(prev, p, 0.5, rad));
+                this.constraints.push(this.physics.constructor.createConstraint(prev, p, 0.5, baseRad));
             }
         }
     }
 
     generateParts() {
         if (this.type === 'grazer') {
-            // Grazers have fins mostly
             this.parts.push({ type: 'Fin', boneIndex: 1, side: 1 });
             this.parts.push({ type: 'Fin', boneIndex: 1, side: -1 });
             return;
         }
 
-        const partCount = Math.floor(this.difficulty);
+        const partCount = 1 + Math.floor(this.tier);
+        // Don't add too many parts
+        const maxParts = 5;
+        const count = Math.min(maxParts, partCount);
+
         let hasWeapon = false;
 
-        // Jaws Chance (Frontal Weapon)
         if (this.type !== 'grazer' && Math.random() > 0.6) {
-             this.parts.push({ type: 'Jaws', boneIndex: 0, side: 0 }); // Center head
+             this.parts.push({ type: 'Jaws', boneIndex: 0, side: 0 });
              hasWeapon = true;
         }
 
-        for(let i=0; i<partCount; i++) {
+        for(let i=0; i<count; i++) {
             let type = Math.random() > 0.5 ? 'Fin' : 'Spike';
-
-            // Force weapon if none yet and last part
-            if (!hasWeapon && i === partCount - 1) {
-                type = 'Spike';
-            }
+            if (!hasWeapon && i === count - 1) type = 'Spike';
             if (type === 'Spike') hasWeapon = true;
 
             const boneIndex = Math.floor(Math.random() * (this.points.length));
@@ -1432,19 +1532,22 @@ class Enemy {
             dx = head.x - playerHead.x;
             dy = head.y - playerHead.y;
         } else {
-            // Wander
             dx = this.targetX - head.x;
             dy = this.targetY - head.y;
-            if (Math.hypot(dx, dy) < 50) this.pickState(playerHead, playerMass);
+            if (Math.hypot(dx, dy) < 50 * this.scale) this.pickState(playerHead, playerMass);
         }
 
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
-            const force = this.stats.speed * dt * dt;
-            const weight = this.type === 'grazer' ? 0.3 : 1.0;
+            const force = this.stats.speed * dt * dt * 50; // Mass is high, need more force?
+            // Physics: F = ma. a = F/m.
+            // If mass scales by Scale^2, and we want similar acceleration, Force must scale by Scale^2.
+            // But we want bigger things to feel heavier (slower accel).
+            // Let's scale force by Scale.
 
-            head.x += (dx / dist) * force * weight;
-            head.y += (dy / dist) * force * weight;
+            const massFactor = this.scale * 20; // Heavier feel
+            head.x += (dx / dist) * (this.stats.speed / massFactor) * dt;
+            head.y += (dy / dist) * (this.stats.speed / massFactor) * dt;
         }
 
         this.physics.update(this.points, this.constraints, dt);
@@ -1455,24 +1558,19 @@ class Enemy {
 
         const head = this.points[0];
         const dist = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
-        const aggroRange = (this.persistent ? 2000 : 800) * this.scale; // Persistent (Apex) has huge aggro
+        const aggroRange = (this.persistent ? 2000 : 800) * this.scale;
 
-        // Decision Logic
-        // 1. Health Critical? -> Flee
         if (this.health < this.maxHealth * 0.3 && !this.persistent) {
             this.state = 'flee';
-            this.color = '#ffaa00'; // Fear color
             return;
         }
 
-        // 2. Player Nearby?
-        if (dist < aggroRange || this.persistent) { // Apex always chases if persistent
+        if (dist < aggroRange || this.persistent) {
             if (this.type === 'grazer') {
                 this.state = 'flee';
             } else if (this.type === 'titan' || this.persistent) {
                 this.state = 'chase';
             } else {
-                // Hunter: Compare Mass
                 if (playerMass > this.mass * 1.5) {
                     this.state = 'flee';
                 } else if (playerMass < this.mass * 0.8) {
@@ -1484,32 +1582,46 @@ class Enemy {
             }
         } else {
             this.state = 'wander';
-            this.targetX = head.x + (Math.random()-0.5) * 1000;
-            this.targetY = head.y + (Math.random()-0.5) * 1000;
+            const wanderDist = 1000 * this.scale;
+            this.targetX = head.x + (Math.random()-0.5) * wanderDist;
+            this.targetY = head.y + (Math.random()-0.5) * wanderDist;
         }
     }
 
-    // Called when damaged
     onHit(sourceX, sourceY) {
-        // Counter attack logic
         this.health -= 10;
         if (this.health > 0 && this.type !== 'grazer') {
-            this.state = 'chase'; // Aggro
-            this.stateTimer = 5.0; // Focus on player
+            this.state = 'chase';
+            this.stateTimer = 5.0;
         }
     }
 
     render(ctx) {
         if (!this.active) return;
-
         ctx.save();
+
+        // Use new organic rendering for enemies too?
+        // Basic organic: fill circles with soft color
 
         // Body
         for (let i = this.points.length - 1; i >= 0; i--) {
             const p = this.points[i];
+
+            // Soft Gradient
+            const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
+            grad.addColorStop(0, 'rgba(255,255,255,0.5)');
+            grad.addColorStop(0.5, this.color);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius * 1.2, 0, Math.PI*2);
+            ctx.fill();
+
+            // Core
             ctx.fillStyle = this.color;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+            ctx.arc(p.x, p.y, p.radius * 0.5, 0, Math.PI*2);
             ctx.fill();
         }
 
@@ -1535,22 +1647,27 @@ class Enemy {
              ctx.rotate(ang + sideAngle);
              ctx.translate(bone.radius, 0);
 
+             // Scale part by creature scale
+             const pScale = this.scale;
+             ctx.scale(pScale, pScale);
+
              if(part.type === 'Fin') {
-                 ctx.fillStyle = '#fff';
-                 ctx.globalAlpha = 0.5;
+                 ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                 ctx.strokeStyle = '#fff';
+                 ctx.lineWidth = 1;
                  ctx.beginPath();
-                 ctx.moveTo(0,0); ctx.lineTo(15, -10); ctx.lineTo(30, 0);
-                 ctx.fill();
+                 ctx.moveTo(0,0); ctx.quadraticCurveTo(15, -10, 30, 0); ctx.quadraticCurveTo(15, 10, 0, 0);
+                 ctx.fill(); ctx.stroke();
              } else if (part.type === 'Spike') {
                  ctx.fillStyle = '#f00';
                  ctx.beginPath();
                  ctx.moveTo(0, -5); ctx.lineTo(20, 0); ctx.lineTo(0, 5);
                  ctx.fill();
              } else if (part.type === 'Jaws') {
-                 ctx.fillStyle = '#ccc';
+                 ctx.fillStyle = '#eee';
                  ctx.beginPath();
-                 ctx.moveTo(0, -10); ctx.lineTo(20, -5); ctx.lineTo(0, 0);
-                 ctx.moveTo(0, 10); ctx.lineTo(20, 5); ctx.lineTo(0, 0);
+                 ctx.moveTo(0, -5); ctx.lineTo(15, -2); ctx.lineTo(0, 0);
+                 ctx.moveTo(0, 5); ctx.lineTo(15, 2); ctx.lineTo(0, 0);
                  ctx.fill();
              } else if (part.type === 'Eye') {
                  ctx.fillStyle = '#fff';
@@ -2010,6 +2127,127 @@ class BiomeManager {
 }
 
 
+// --- js/background.js ---
+class Background {
+    constructor(game) {
+        this.game = game;
+        this.layers = [];
+        this.width = game.width;
+        this.height = game.height;
+        this.initLayers();
+    }
+
+    initLayers() {
+        // Layer 1: Far (Blurred, Slow)
+        this.layers.push({
+            speed: 0.1,
+            particles: this.createParticles(50, 2, 4), // Small dots
+            color: 'rgba(255, 255, 255, 0.1)',
+            blur: 2
+        });
+
+        // Layer 2: Mid (Sharp, Medium Speed)
+        this.layers.push({
+            speed: 0.3,
+            particles: this.createParticles(30, 3, 6),
+            color: 'rgba(255, 255, 255, 0.2)',
+            blur: 0
+        });
+
+        // Layer 3: Near (Large Bokeh, Fast)
+        this.layers.push({
+            speed: 0.6,
+            particles: this.createParticles(10, 20, 50), // Large blobs
+            color: 'rgba(255, 255, 255, 0.05)',
+            blur: 5
+        });
+    }
+
+    createParticles(count, minSize, maxSize) {
+        const p = [];
+        for(let i=0; i<count; i++) {
+            p.push({
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
+                size: minSize + Math.random() * (maxSize - minSize),
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 10
+            });
+        }
+        return p;
+    }
+
+    resize(w, h) {
+        this.width = w;
+        this.height = h;
+        // Re-distribute particles? Or just let them wrap.
+    }
+
+    update(dt, camera) {
+        // Scroll based on camera movement
+        this.layers.forEach(layer => {
+            layer.particles.forEach(p => {
+                // Parallax Scroll
+                // We move particles opposite to camera
+                p.x -= camera.vx * layer.speed * dt;
+                p.y -= camera.vy * layer.speed * dt;
+
+                // Natural Drift
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                // Wrap Screen
+                // Use a large virtual bounds to avoid popping
+                const margin = 100;
+                // Calculate screen position relative to camera wrap is tricky with zoom.
+                // Simpler: Keep particles in "Screen Space" and just offset them.
+
+                if (p.x < -margin) p.x += this.width + margin * 2;
+                if (p.x > this.width + margin) p.x -= this.width + margin * 2;
+                if (p.y < -margin) p.y += this.height + margin * 2;
+                if (p.y > this.height + margin) p.y -= this.height + margin * 2;
+            });
+        });
+    }
+
+    render(ctx, biomeColor) {
+        // Draw Deep Background Gradient
+        // We use the Biome Color but make it a gradient
+        const grd = ctx.createLinearGradient(0, 0, 0, this.height);
+        grd.addColorStop(0, '#000011'); // Always dark top
+        grd.addColorStop(1, biomeColor || '#001020'); // Biome bottom
+
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, this.width, this.height);
+
+        // Draw Particles
+        this.layers.forEach(layer => {
+            ctx.fillStyle = layer.color;
+            // Optim: Batch drawing if possible, but individual circles are fast enough
+            // Filter is expensive. Avoid context filter in loop if possible.
+            // But for "Microscope" look, blur is key.
+            // On mobile, ctx.filter is heavy.
+            // Trick: Use 'globalAlpha' and soft gradients for bokeh, not blur filter.
+
+            layer.particles.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                ctx.fill();
+            });
+        });
+
+        // Vignette Overlay (Static)
+        const rad = Math.max(this.width, this.height) * 0.8;
+        const vig = ctx.createRadialGradient(this.width/2, this.height/2, rad * 0.5, this.width/2, this.height/2, rad);
+        vig.addColorStop(0, 'rgba(0,0,0,0)');
+        vig.addColorStop(1, 'rgba(0,0,10,0.6)'); // Dark blue vignette
+
+        ctx.fillStyle = vig;
+        ctx.fillRect(0, 0, this.width, this.height);
+    }
+}
+
+
 // --- js/legacy.js ---
 // Legacy System (Roguelite Progression)
 
@@ -2130,16 +2368,13 @@ class Editor {
     constructor(game) {
         this.game = game;
         this.active = false;
-
-        // Editor State
         this.selectedPart = null;
         this.isDragging = false;
         this.dragX = 0;
         this.dragY = 0;
-
+        this.clone = null;
         this.symmetry = false;
         this.sellMode = false;
-        this.clone = null; // Petri Dish Clone
 
         setTimeout(() => this.setupUI(), 100);
     }
@@ -2149,22 +2384,21 @@ class Editor {
         this.overlay.id = 'editor-overlay';
         this.overlay.style = `position:absolute; top:0; left:0; width:100%; height:100%; display:none; pointer-events:none; z-index:2000; font-family:Orbitron;`;
 
-        // Revised Layout for Mobile: Bottom Bar for Parts, Top Bar for Controls
         this.overlay.innerHTML = `
-            <div style="position:absolute; top:0; left:0; width:100%; height:60px; background:rgba(0,0,0,0.8); display:flex; justify-content:space-between; align-items:center; padding:0 10px; box-sizing:border-box; pointer-events:auto; border-bottom:1px solid #333;">
-                <div style="color:#0ff; font-size:1.2rem; text-shadow:0 0 10px #0ff;">
-                    WORKBENCH <span id="editor-dna" style="font-size:0.7em; color:#fff; margin-left:10px;">DNA: 0</span>
+            <div id="workbench-header" style="position:absolute; top:0; left:0; width:100%; background:rgba(0,0,0,0.8); padding:10px; box-sizing:border-box; pointer-events:auto; border-bottom:1px solid #333;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <div style="color:#0ff; font-size:1.2rem;">WORKBENCH <span id="editor-dna" style="font-size:0.7em; color:#fff; margin-left:10px;">DNA: 0</span></div>
+                    <button id="close-editor-btn" class="btn-neon wb-btn" style="border-color:#f0f; color:#f0f; font-size:0.8rem; padding:5px 15px;">PLAY</button>
                 </div>
-                <div style="display:flex; gap:10px;">
-                    <button id="add-vertebra-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">+ BONE (10)</button>
-                    <button id="toggle-mirror-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px;">SYM: OFF</button>
-                    <button id="toggle-sell-btn" class="btn-neon" style="font-size:0.8rem; padding:5px 10px; border-color:#fa0; color:#fa0;">SELL: OFF</button>
-                    <button id="close-editor-btn" class="btn-neon" style="border-color:#f0f; color:#f0f; font-size:0.8rem; padding:5px 15px;">PLAY</button>
+                <div id="workbench-controls" style="display:flex; gap:10px;">
+                    <button id="add-vertebra-btn" class="btn-neon wb-btn">+ BONE (10)</button>
+                    <button id="toggle-mirror-btn" class="btn-neon wb-btn">SYM: OFF</button>
+                    <button id="toggle-sell-btn" class="btn-neon wb-btn" style="border-color:#fa0; color:#fa0;">SELL: OFF</button>
                 </div>
             </div>
 
             <!-- Zoom Controls -->
-            <div style="position:absolute; top:80px; right:20px; display:flex; flex-direction:column; gap:10px; pointer-events:auto;">
+            <div style="position:absolute; top:130px; right:20px; display:flex; flex-direction:column; gap:10px; pointer-events:auto;">
                 <button id="zoom-in-btn" class="btn-neon" style="width:40px; height:40px; border-radius:50%; font-size:1.5rem; padding:0;">+</button>
                 <button id="zoom-out-btn" class="btn-neon" style="width:40px; height:40px; border-radius:50%; font-size:1.5rem; padding:0;">-</button>
             </div>
@@ -2173,11 +2407,23 @@ class Editor {
                 <!-- Populated Dynamically -->
             </div>
 
-            <div id="editor-instruction" style="position:absolute; top:70px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
+            <div id="editor-instruction" style="position:absolute; top:110px; width:100%; text-align:center; color:rgba(255,255,255,0.5); font-size:0.8rem; pointer-events:none;">
                 DRAG PARTS TO BODY • TAP BONE TO RESIZE
             </div>
         `;
         document.body.appendChild(this.overlay);
+
+        // UI LAYOUT FIX (CSS Injection)
+        const controls = document.getElementById('workbench-controls');
+        if(controls) {
+            controls.style.flexWrap = 'wrap';
+            controls.style.justifyContent = 'center';
+        }
+        document.querySelectorAll('.wb-btn').forEach(b => {
+             b.style.width = '30%';
+             b.style.fontSize = '0.7rem';
+             b.style.padding = '5px';
+        });
 
         // Listeners
         document.getElementById('close-editor-btn').addEventListener('click', () => this.toggle(false));
@@ -2187,7 +2433,7 @@ class Editor {
         document.getElementById('zoom-in-btn').addEventListener('click', () => this.zoomCamera(0.2));
         document.getElementById('zoom-out-btn').addEventListener('click', () => this.zoomCamera(-0.2));
 
-        // Drag Listeners
+        // Input Handling
         window.addEventListener('mousemove', (e) => this.onDrag(e));
         window.addEventListener('touchmove', (e) => this.onDrag(e), {passive: false});
         window.addEventListener('mouseup', (e) => this.endDrag(e));
@@ -2197,15 +2443,223 @@ class Editor {
         this.game.canvas.addEventListener('touchstart', (e) => this.onCanvasClick(e), {passive: false});
     }
 
+    findClosestBodyNode(mx, my) {
+        // Find closest node based on screen position
+        const cam = this.game.camera;
+        let closest = null;
+        let minDist = Infinity;
+
+        if (!this.clone || !this.clone.points) return null;
+
+        this.clone.points.forEach((p, index) => {
+            const sp = cam.worldToScreen(p.x, p.y);
+            const dx = mx - sp.x;
+            const dy = my - sp.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < minDist) {
+                minDist = dist;
+                closest = { point: p, index: index, sp: sp };
+            }
+        });
+
+        // Threshold: 300px radius for interaction
+        if (minDist > 300) return null;
+        return closest;
+    }
+
+    startDrag(e, type) {
+        if (this.sellMode) return;
+        this.isDragging = true;
+        this.selectedPart = type;
+        const pt = this.getEventPos(e);
+        this.dragX = pt.x;
+        this.dragY = pt.y;
+    }
+
+    onDrag(e) {
+        if (!this.isDragging) return;
+        const pt = this.getEventPos(e);
+        this.dragX = pt.x;
+        this.dragY = pt.y;
+    }
+
+    endDrag(e) {
+        if (!this.isDragging) return;
+        this.isDragging = false;
+
+        const closest = this.findClosestBodyNode(this.dragX, this.dragY);
+
+        if (closest) {
+            // STRICT MATH LOGIC (Snapping)
+            const cam = this.game.camera;
+            const mouseWorld = cam.screenToWorld(this.dragX, this.dragY);
+            const node = closest.point;
+
+            const dx = mouseWorld.x - node.x;
+            const dy = mouseWorld.y - node.y;
+            const angle = Math.atan2(dy, dx);
+
+            // Cost Calculation
+            const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
+            let totalCost = cost;
+            if (this.symmetry) totalCost *= 2;
+
+            if (this.clone.gameStats.dna < totalCost) {
+                alert("Not enough DNA!");
+                this.selectedPart = null;
+                return;
+            }
+
+            // Add Part
+            this.addPart(this.selectedPart, closest.index, angle);
+
+            // Symmetry Logic: Mirror Angle across Y Axis (PI - angle)
+            if (this.symmetry) {
+                let mirrorAngle = Math.PI - angle;
+                // Normalize Angle
+                while(mirrorAngle > Math.PI) mirrorAngle -= Math.PI*2;
+                while(mirrorAngle < -Math.PI) mirrorAngle += Math.PI*2;
+
+                this.addPart(this.selectedPart, closest.index, mirrorAngle);
+            }
+
+            this.clone.gameStats.dna -= totalCost;
+            this.updateDNA();
+            if (navigator.vibrate) navigator.vibrate(50);
+        }
+
+        this.selectedPart = null;
+    }
+
+    addPart(type, index, angle) {
+        if (!this.clone.parts) this.clone.parts = [];
+        this.clone.parts.push({
+            type: type,
+            boneIndex: index,
+            angle: angle,
+            side: 0 // Legacy/Unused
+        });
+    }
+
+    render(ctx) {
+        if (!this.active) return;
+
+        ctx.save();
+        ctx.fillStyle = '#050510';
+        ctx.fillRect(0, 0, this.game.width, this.game.height);
+
+        // Petri Dish BG
+        ctx.translate(this.game.width/2, this.game.height/2);
+        ctx.scale(this.game.camera.zoom, this.game.camera.zoom);
+        ctx.translate(-this.game.camera.x, -this.game.camera.y);
+
+        const DISH_RADIUS = 600;
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(0, 0, DISH_RADIUS, 0, Math.PI*2);
+        ctx.stroke();
+
+        if (this.clone) {
+            // Render Clone Creature
+            this.game.renderer.drawCreature(this.clone, -Math.PI/2);
+        }
+
+        ctx.restore();
+
+        // Render Ghost / Snap Highlight
+        if (this.isDragging && this.selectedPart) {
+            const closest = this.findClosestBodyNode(this.dragX, this.dragY);
+
+            if (closest) {
+                const cam = this.game.camera;
+                const mouseWorld = cam.screenToWorld(this.dragX, this.dragY);
+                const node = closest.point;
+
+                const dx = mouseWorld.x - node.x;
+                const dy = mouseWorld.y - node.y;
+                const angle = Math.atan2(dy, dx);
+
+                // Position forced to radius: x = node.x + cos(angle) * radius
+                const ghostWorldX = node.x + Math.cos(angle) * node.radius;
+                const ghostWorldY = node.y + Math.sin(angle) * node.radius;
+
+                // Rotation forced: angle + PI/2
+                const ghostRotation = angle + Math.PI/2;
+
+                const ghostScreen = cam.worldToScreen(ghostWorldX, ghostWorldY);
+
+                // Draw Ghost
+                ctx.save();
+                ctx.translate(ghostScreen.x, ghostScreen.y);
+                ctx.rotate(ghostRotation);
+
+                // Draw simple shape for ghost
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
+                ctx.beginPath();
+                ctx.moveTo(0, -10); ctx.lineTo(10, 10); ctx.lineTo(-10, 10);
+                ctx.fill();
+
+                ctx.restore();
+
+                // Draw Snap Circle on Node
+                ctx.save();
+                ctx.strokeStyle = '#0ff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(closest.sp.x, closest.sp.y, node.radius * cam.zoom * 1.2, 0, Math.PI*2);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // Draw Drag Label
+            ctx.save();
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Orbitron';
+            ctx.fillText(this.selectedPart, this.dragX + 15, this.dragY);
+            ctx.restore();
+        }
+
+        if (this.selectedBone && !this.isDragging) {
+            const cam = this.game.camera;
+            const p = this.selectedBone.p;
+            const sp = cam.worldToScreen(p.x, p.y);
+            ctx.save();
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, p.radius * cam.zoom * 1.2 + 5, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    // --- HELPER METHODS ---
+
+    getEventPos(e) {
+        const rect = this.game.canvas.getBoundingClientRect();
+        let clientX = 0, clientY = 0;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+             clientX = e.changedTouches[0].clientX;
+             clientY = e.changedTouches[0].clientY;
+        } else {
+             clientX = e.clientX;
+             clientY = e.clientY;
+        }
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
     refreshParts() {
         const list = document.getElementById('editor-parts-list');
         list.innerHTML = '';
-
         const unlocked = this.game.progression.getAvailableParts();
         unlocked.forEach(key => {
             const part = PARTS_DB[key];
             const div = document.createElement('div');
-            // Card Style
             div.className = 'part-card';
             div.style = `
                 width:60px; height:60px; border:1px solid #444; background:rgba(20,20,20,0.8);
@@ -2213,18 +2667,14 @@ class Editor {
                 border-radius:5px; cursor:grab; user-select:none; color:#aaa; font-size:0.6rem;
                 flex-shrink: 0;
             `;
-
             div.innerHTML = `
                 <div style="font-size:1.2rem; margin-bottom:2px;">${key[0]}</div>
                 <div style="font-weight:bold; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:90%;">${part.name}</div>
                 <div style="color:#0f0;">${part.cost}</div>
             `;
-
             if (key === 'Eye') div.style.borderColor = '#fff';
-
             div.addEventListener('mousedown', (e) => this.startDrag(e, key));
             div.addEventListener('touchstart', (e) => this.startDrag(e, key), {passive: false});
-
             list.appendChild(div);
         });
     }
@@ -2246,167 +2696,28 @@ class Editor {
         }
     }
 
-    enterPetriMode() {
-        this.game.input.active = false;
-
-        const source = this.game.creature;
-        this.clone = {
-            points: [],
-            constraints: [],
-            parts: JSON.parse(JSON.stringify(source.parts || [])),
-            stats: source.stats,
-            gameStats: source.gameStats,
-            color: source.color
-        };
-
-        let y = 0;
-        source.points.forEach((p, i) => {
-            const spacing = (i === 0) ? 0 : 25;
-            y += spacing;
-
-            const cp = Physics.createPoint(0, y, p.baseRadius || 20, p.mass);
-            cp.baseRadius = p.baseRadius || 20;
-            cp.radius = cp.baseRadius;
-            cp.initialBaseRadius = p.initialBaseRadius;
-            cp.scaleFactor = p.scaleFactor;
-
-            this.clone.points.push(cp);
-        });
-
-        const totalHeight = y;
-        const startY = -totalHeight / 2;
-
-        this.clone.points.forEach(p => {
-            p.y += startY;
-            p.oldY = p.y;
-        });
-
-        for(let i=1; i<this.clone.points.length; i++) {
-            const p1 = this.clone.points[i-1];
-            const p2 = this.clone.points[i];
-            const dist = p2.y - p1.y;
-            const c = Physics.createConstraint(p1, p2, 0.5, dist);
-            c.baseLength = dist;
-            this.clone.constraints.push(c);
-        }
-
-        this.game.camera.x = 0;
-        this.game.camera.y = 0;
-        this.fitCamera();
-    }
-
-    exitPetriMode() {
-        const target = this.game.creature;
-
-        if (target.points.length > 0) {
-            const oldData = {
-                parts: JSON.parse(JSON.stringify(target.parts)),
-                points: target.points.map(p => ({
-                    x: p.x, y: p.y,
-                    baseRadius: p.baseRadius,
-                    mass: p.mass,
-                    radius: p.radius
-                })),
-                gameStats: { ...target.gameStats },
-                color: target.color
-            };
-
-            const startX = target.points[0].x;
-            const startY = target.points[0].y;
-
-            this.game.spawnAlly(oldData, startX, startY);
-        }
-
-        target.parts = JSON.parse(JSON.stringify(this.clone.parts));
-
-        while (target.points.length < this.clone.points.length) {
-            const last = target.points[target.points.length-1];
-            const prev = target.points[target.points.length-2] || last;
-            const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
-            const r = last.radius;
-            const newX = last.x + Math.cos(angle) * 20;
-            const newY = last.y + Math.sin(angle) * 20;
-
-            const p = Physics.createPoint(newX, newY, r, 1);
-            p.baseRadius = r;
-            target.points.push(p);
-
-            const c = Physics.createConstraint(last, p, 0.5, 20);
-            c.baseLength = 20;
-            target.constraints.push(c);
-        }
-
-        for(let i=0; i<this.clone.points.length; i++) {
-            const cp = this.clone.points[i];
-            const tp = target.points[i];
-            if (tp) {
-                tp.baseRadius = cp.baseRadius;
-                tp.initialBaseRadius = cp.initialBaseRadius;
-                tp.scaleFactor = cp.scaleFactor;
-            }
-        }
-
-        target.stats.calculate(target.parts);
-
-        this.game.camera.targetZoom = 0.7;
-        this.game.input.active = true;
-
-        if (this.game.mate) {
-            this.game.mate = null;
-        }
-
-        this.game.saveManager.save();
-    }
-
-    fitCamera() {
-        const DISH_RADIUS = 600;
-        const availableW = this.game.width;
-        const availableH = this.game.height - 160;
-
-        const margin = 1.1;
-        const zoomX = availableW / (DISH_RADIUS * 2 * margin);
-        const zoomY = availableH / (DISH_RADIUS * 2 * margin);
-
-        let targetZoom = Math.min(zoomX, zoomY);
-        targetZoom = Math.min(targetZoom, 3.0);
-        targetZoom = Math.max(targetZoom, 0.2);
-
-        this.game.camera.targetZoom = targetZoom;
-        this.game.camera.x = 0;
-        this.game.camera.y = 0;
-        this.game.camera.vx = 0;
-        this.game.camera.vy = 0;
-    }
-
-    zoomCamera(delta) {
-        const cam = this.game.camera;
-        let newZoom = cam.zoom + delta;
-        newZoom = Math.min(newZoom, 3.0);
-        newZoom = Math.max(newZoom, 0.2);
-
-        cam.zoom = newZoom;
-        cam.targetZoom = newZoom;
-    }
-
     toggleSymmetry() {
         this.symmetry = !this.symmetry;
         const btn = document.getElementById('toggle-mirror-btn');
-        btn.innerText = `SYM: ${this.symmetry ? 'ON' : 'OFF'}`;
-        btn.style.borderColor = this.symmetry ? '#0f0' : '#0ff';
-        btn.style.color = this.symmetry ? '#0f0' : '#0ff';
+        if(btn) {
+            btn.innerText = `SYM: ${this.symmetry ? 'ON' : 'OFF'}`;
+            btn.style.borderColor = this.symmetry ? '#0f0' : '#0ff';
+            btn.style.color = this.symmetry ? '#0f0' : '#0ff';
+        }
     }
 
     toggleSellMode() {
         this.sellMode = !this.sellMode;
         this.updateSellBtn();
-
         const txt = document.getElementById('editor-instruction');
-        if (this.sellMode) {
-             txt.innerText = "TAP PART TO SELL (REFUND 50%)";
-             txt.style.color = "#fa0";
-        } else {
-             txt.innerText = "DRAG PARTS TO BODY • TAP BONE TO RESIZE";
-             txt.style.color = "rgba(255,255,255,0.5)";
+        if (txt) {
+             if (this.sellMode) {
+                 txt.innerText = "TAP PART TO SELL (REFUND 50%)";
+                 txt.style.color = "#fa0";
+            } else {
+                 txt.innerText = "DRAG PARTS TO BODY • TAP BONE TO RESIZE";
+                 txt.style.color = "rgba(255,255,255,0.5)";
+            }
         }
     }
 
@@ -2428,7 +2739,6 @@ class Editor {
     addVertebra() {
         if (!this.clone) return;
         if (this.clone.gameStats.dna < 10) return;
-
         const points = this.clone.points;
         if (points.length >= 30) return;
 
@@ -2453,124 +2763,128 @@ class Editor {
         this.fitCamera();
     }
 
-    startDrag(e, type) {
-        if (this.sellMode) return;
-        this.isDragging = true;
-        this.selectedPart = type;
-        const pt = this.getEventPos(e);
-        this.dragX = pt.x;
-        this.dragY = pt.y;
-    }
-
-    onDrag(e) {
-        if (!this.isDragging) return;
-        const pt = this.getEventPos(e);
-        this.dragX = pt.x;
-        this.dragY = pt.y;
-    }
-
-    findClosestBodyNode(pt) {
-        const cam = this.game.camera;
-        let closest = null;
-        let minDist = 300; // Large radius for easy grabbing
-
-        this.clone.points.forEach((p, index) => {
-            const sp = cam.worldToScreen(p.x, p.y);
-            const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
-            if (dist < minDist) {
-                minDist = dist;
-                closest = { point: p, index: index, sp: sp };
-            }
-        });
-        return closest;
-    }
-
-    getSnapInfo(node, dragX, dragY) {
-        // Calculate angle from node center to mouse (in screen space -> world vector)
-        const cam = this.game.camera;
-        const mouseWorld = cam.screenToWorld(dragX, dragY);
-
-        // Angle from bone center to mouse
-        const angle = Math.atan2(mouseWorld.y - node.point.y, mouseWorld.x - node.point.x);
-
-        return { angle: angle };
-    }
-
-    endDrag(e) {
-        if (!this.isDragging) return;
-        this.isDragging = false;
-
-        const closest = this.findClosestBodyNode({x: this.dragX, y: this.dragY});
-
-        if (closest) {
-            const snap = this.getSnapInfo(closest, this.dragX, this.dragY);
-
-            const cost = PARTS_DB[this.selectedPart] ? PARTS_DB[this.selectedPart].cost : 5;
-            let totalCost = cost;
-
-            // Determine side for symmetry
-            // If angle is roughly right (0 to PI) or left (PI to 2PI/negative) relative to spine?
-            // Let's assume standard 'side' logic for symmetry cost calculation for now.
-            // But we will store the angle.
-
-            if (this.symmetry) totalCost *= 2; // Always double for simplicity if toggle is on
-
-            if (this.clone.gameStats.dna < totalCost) {
-                alert("Not enough DNA!");
-                this.selectedPart = null;
-                return;
-            }
-
-            this.addPart(this.selectedPart, closest.index, snap.angle);
-
-            if (this.symmetry) {
-                // Mirror angle across spine axis (Vertical Y Axis)
-                // Angle mirrored across Y axis: PI - angle.
-                let mirrorAngle = Math.PI - snap.angle;
-                // Normalize
-                while(mirrorAngle > Math.PI) mirrorAngle -= Math.PI*2;
-                while(mirrorAngle < -Math.PI) mirrorAngle += Math.PI*2;
-
-                this.addPart(this.selectedPart, closest.index, mirrorAngle);
-            }
-
-            this.clone.gameStats.dna -= totalCost;
-            this.updateDNA();
-            if (navigator.vibrate) navigator.vibrate(50);
-        }
-
-        this.selectedPart = null;
-    }
-
-    addPart(type, index, angle) {
-        if (!this.clone.parts) this.clone.parts = [];
-        this.clone.parts.push({
-            type: type,
-            boneIndex: index,
-            angle: angle, // NEW: precise angle
-            side: 0 // Legacy/Unused for rendering now, but kept for schema
-        });
-    }
-
-    getEventPos(e) {
-        const rect = this.game.canvas.getBoundingClientRect();
-        let clientX = 0, clientY = 0;
-
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        } else if (e.changedTouches && e.changedTouches.length > 0) {
-             clientX = e.changedTouches[0].clientX;
-             clientY = e.changedTouches[0].clientY;
-        } else {
-             clientX = e.clientX;
-             clientY = e.clientY;
-        }
-
-        return {
-            x: clientX - rect.left,
-            y: clientY - rect.top
+    enterPetriMode() {
+        this.game.input.active = false;
+        const source = this.game.creature;
+        this.clone = {
+            points: [],
+            constraints: [],
+            parts: JSON.parse(JSON.stringify(source.parts || [])),
+            stats: source.stats,
+            gameStats: source.gameStats,
+            color: source.color
         };
+
+        let y = 0;
+        source.points.forEach((p, i) => {
+            const spacing = (i === 0) ? 0 : 25;
+            y += spacing;
+            const cp = Physics.createPoint(0, y, p.baseRadius || 20, p.mass);
+            cp.baseRadius = p.baseRadius || 20;
+            cp.radius = cp.baseRadius;
+            cp.initialBaseRadius = p.initialBaseRadius;
+            cp.scaleFactor = p.scaleFactor;
+            this.clone.points.push(cp);
+        });
+
+        const totalHeight = y;
+        const startY = -totalHeight / 2;
+        this.clone.points.forEach(p => {
+            p.y += startY;
+            p.oldY = p.y;
+        });
+
+        for(let i=1; i<this.clone.points.length; i++) {
+            const p1 = this.clone.points[i-1];
+            const p2 = this.clone.points[i];
+            const dist = p2.y - p1.y;
+            const c = Physics.createConstraint(p1, p2, 0.5, dist);
+            c.baseLength = dist;
+            this.clone.constraints.push(c);
+        }
+
+        this.game.camera.x = 0;
+        this.game.camera.y = 0;
+        this.fitCamera();
+    }
+
+    exitPetriMode() {
+        const target = this.game.creature;
+        if (target.points.length > 0) {
+            const oldData = {
+                parts: JSON.parse(JSON.stringify(target.parts)),
+                points: target.points.map(p => ({
+                    x: p.x, y: p.y,
+                    baseRadius: p.baseRadius,
+                    mass: p.mass,
+                    radius: p.radius
+                })),
+                gameStats: { ...target.gameStats },
+                color: target.color
+            };
+            const startX = target.points[0].x;
+            const startY = target.points[0].y;
+            this.game.spawnAlly(oldData, startX, startY);
+        }
+
+        target.parts = JSON.parse(JSON.stringify(this.clone.parts));
+
+        while (target.points.length < this.clone.points.length) {
+            const last = target.points[target.points.length-1];
+            const prev = target.points[target.points.length-2] || last;
+            const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+            const r = last.radius;
+            const newX = last.x + Math.cos(angle) * 20;
+            const newY = last.y + Math.sin(angle) * 20;
+            const p = Physics.createPoint(newX, newY, r, 1);
+            p.baseRadius = r;
+            target.points.push(p);
+            const c = Physics.createConstraint(last, p, 0.5, 20);
+            c.baseLength = 20;
+            target.constraints.push(c);
+        }
+
+        for(let i=0; i<this.clone.points.length; i++) {
+            const cp = this.clone.points[i];
+            const tp = target.points[i];
+            if (tp) {
+                tp.baseRadius = cp.baseRadius;
+                tp.initialBaseRadius = cp.initialBaseRadius;
+                tp.scaleFactor = cp.scaleFactor;
+            }
+        }
+
+        target.stats.calculate(target.parts);
+        this.game.camera.targetZoom = 0.7;
+        this.game.input.active = true;
+        if (this.game.mate) this.game.mate = null;
+        this.game.saveManager.save();
+    }
+
+    fitCamera() {
+        const DISH_RADIUS = 600;
+        const availableW = this.game.width;
+        const availableH = this.game.height - 160;
+        const margin = 1.1;
+        const zoomX = availableW / (DISH_RADIUS * 2 * margin);
+        const zoomY = availableH / (DISH_RADIUS * 2 * margin);
+        let targetZoom = Math.min(zoomX, zoomY);
+        targetZoom = Math.min(targetZoom, 3.0);
+        targetZoom = Math.max(targetZoom, 0.2);
+        this.game.camera.targetZoom = targetZoom;
+        this.game.camera.x = 0;
+        this.game.camera.y = 0;
+        this.game.camera.vx = 0;
+        this.game.camera.vy = 0;
+    }
+
+    zoomCamera(delta) {
+        const cam = this.game.camera;
+        let newZoom = cam.zoom + delta;
+        newZoom = Math.min(newZoom, 3.0);
+        newZoom = Math.max(newZoom, 0.2);
+        cam.zoom = newZoom;
+        cam.targetZoom = newZoom;
     }
 
     onCanvasClick(e) {
@@ -2578,43 +2892,25 @@ class Editor {
         if (e.target !== this.game.canvas) return;
 
         const pt = this.getEventPos(e);
-        const cam = this.game.camera;
+        const closest = this.findClosestBodyNode(pt.x, pt.y);
 
-        // Selection Fix: Prefer closest center point
-        let clickedBone = null;
-        let minBoneDist = 999;
-
-        this.clone.points.forEach((p, index) => {
-            const sp = cam.worldToScreen(p.x, p.y);
-            const dist = Math.hypot(sp.x - pt.x, sp.y - pt.y);
-            // Check if inside circle radius on screen
-            const radiusScreen = p.radius * cam.zoom;
-
-            if (dist < radiusScreen * 2.0 && dist < minBoneDist) { // Allow slight margin
-                minBoneDist = dist;
-                clickedBone = { p, index, sp, dist: dist };
-            }
-        });
-
-        if (clickedBone) {
+        if (closest) {
             const parts = this.clone.parts || [];
-            const boneParts = parts.filter(p => p.boneIndex === clickedBone.index);
+            const boneParts = parts.filter(p => p.boneIndex === closest.index);
 
             if (this.sellMode) {
                  if (boneParts.length > 0) {
                     const toRemove = boneParts[boneParts.length - 1];
                     const cost = PARTS_DB[toRemove.type] ? PARTS_DB[toRemove.type].cost : 5;
                     this.clone.gameStats.dna += Math.floor(cost * 0.5);
-
                     const idx = parts.indexOf(toRemove);
                     if (idx > -1) parts.splice(idx, 1);
-
                     this.updateDNA();
                     if (navigator.vibrate) navigator.vibrate(50);
                  }
             } else {
-                 this.selectedBone = clickedBone;
-                 this.showResizeSlider(clickedBone);
+                 this.selectedBone = closest;
+                 this.showResizeSlider(closest);
             }
         } else {
             this.selectedBone = null;
@@ -2633,161 +2929,32 @@ class Editor {
                 <input type="range" id="bone-scale" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
             `;
             document.body.appendChild(slider);
-
             document.getElementById('bone-scale').addEventListener('input', (e) => {
                 if (this.selectedBone) {
                     const scale = parseFloat(e.target.value);
-                    if (!this.selectedBone.p.initialBaseRadius) this.selectedBone.p.initialBaseRadius = this.selectedBone.p.baseRadius;
-
-                    const newRadius = this.selectedBone.p.initialBaseRadius * scale;
-                    this.selectedBone.p.baseRadius = newRadius;
-                    this.selectedBone.p.radius = newRadius;
-                    this.selectedBone.p.scaleFactor = scale;
+                    if (!this.selectedBone.point.initialBaseRadius) this.selectedBone.point.initialBaseRadius = this.selectedBone.point.baseRadius;
+                    const newRadius = this.selectedBone.point.initialBaseRadius * scale;
+                    this.selectedBone.point.baseRadius = newRadius;
+                    this.selectedBone.point.radius = newRadius;
+                    this.selectedBone.point.scaleFactor = scale;
                 }
             });
         }
-
         slider.style.display = 'flex';
         const rect = this.game.canvas.getBoundingClientRect();
         slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x + rect.left - 75)}px`;
         slider.style.top = `${selection.sp.y + rect.top - 80}px`;
-
-        if (selection.p.scaleFactor === undefined) {
-             const base = selection.p.initialBaseRadius || 20;
-             selection.p.scaleFactor = selection.p.baseRadius / base;
+        if (selection.point.scaleFactor === undefined) {
+             const base = selection.point.initialBaseRadius || 20;
+             selection.point.scaleFactor = selection.point.baseRadius / base;
         }
-
-        const currentScale = selection.p.scaleFactor || 1.0;
+        const currentScale = selection.point.scaleFactor || 1.0;
         document.getElementById('bone-scale').value = currentScale;
     }
 
     hideResizeSlider() {
         const slider = document.getElementById('resize-slider-container');
         if (slider) slider.style.display = 'none';
-    }
-
-    render(ctx) {
-        if (!this.active) return;
-
-        ctx.save();
-        ctx.fillStyle = '#050510';
-        ctx.fillRect(0, 0, this.game.width, this.game.height);
-
-        ctx.translate(this.game.width/2, this.game.height/2);
-        ctx.scale(this.game.camera.zoom, this.game.camera.zoom);
-        ctx.translate(-this.game.camera.x, -this.game.camera.y);
-
-        const DISH_RADIUS = 600;
-        ctx.strokeStyle = '#222';
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        ctx.arc(0, 0, DISH_RADIUS, 0, Math.PI*2);
-        ctx.stroke();
-
-        if (this.clone) {
-            ctx.globalCompositeOperation = 'source-over';
-            this.game.renderer.drawCreature(this.clone, -Math.PI/2);
-        }
-
-        ctx.restore();
-
-        if (this.selectedBone) {
-            const cam = this.game.camera;
-            const p = this.selectedBone.p;
-            const sp = cam.worldToScreen(p.x, p.y);
-
-            ctx.save();
-            ctx.strokeStyle = '#ff00ff';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, p.radius * cam.zoom * 1.2 + 5, 0, Math.PI*2);
-            ctx.stroke();
-            ctx.restore();
-        }
-
-        if (this.isDragging && this.selectedPart) {
-            const closest = this.findClosestBodyNode({x: this.dragX, y: this.dragY});
-
-            if (closest) {
-                // MAGNET SNAP RENDER
-                // Snap drag coords to closest bone edge visually
-                const dist = Math.hypot(closest.sp.x - this.dragX, closest.sp.y - this.dragY);
-                let drawX = this.dragX;
-                let drawY = this.dragY;
-
-                // Snap if close
-                if (dist < 80) {
-                    const side = this.calcSide(closest, this.dragX, this.dragY);
-                    // Determine snap pos on screen
-                    // This is purely visual, endDrag re-calcs logic
-                    // ... complex visual snap code omitted for brevity/simplicity, using ghost indicator instead ...
-                }
-
-                ctx.save();
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(closest.sp.x, closest.sp.y, closest.point.radius * this.game.camera.zoom * 1.5, 0, Math.PI*2);
-                ctx.stroke();
-                ctx.restore();
-
-                const bone = closest.point;
-                let spineVec = { x: 0, y: 0 };
-                if (closest.index < this.clone.points.length - 1) {
-                    const next = this.clone.points[closest.index + 1];
-                    spineVec = { x: next.x - bone.x, y: next.y - bone.y };
-                } else {
-                    const prev = this.clone.points[closest.index - 1];
-                    spineVec = { x: bone.x - prev.x, y: bone.y - prev.y };
-                }
-
-                const side = this.calcSide(closest, this.dragX, this.dragY);
-                const spineAngle = Math.atan2(spineVec.y, spineVec.x) + (closest.index===0 ? Math.PI : 0);
-
-                ctx.save();
-                ctx.globalAlpha = 0.5;
-                const sp = closest.sp;
-
-                ctx.translate(sp.x, sp.y);
-
-                let sideAngle = 0;
-                if (side === 1) sideAngle = Math.PI/2;
-                else if (side === -1) sideAngle = -Math.PI/2;
-                else if (side === 2) sideAngle = Math.PI;
-
-                ctx.rotate(spineAngle + sideAngle);
-
-                const scale = Math.max(0.5, bone.radius / 20);
-
-                ctx.translate(bone.radius * this.game.camera.zoom, 0);
-
-                ctx.fillStyle = '#0ff';
-                if(this.selectedPart === 'Spike') ctx.fillStyle = '#f00';
-                if(side === 0) ctx.fillStyle = '#ff0';
-
-                ctx.beginPath();
-                ctx.arc(0, 0, 10 * scale, 0, Math.PI*2);
-                ctx.fill();
-
-                ctx.restore();
-                ctx.globalAlpha = 1.0;
-            }
-
-            ctx.save();
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
-            ctx.shadowColor = '#0ff';
-            ctx.shadowBlur = 10;
-            ctx.beginPath();
-            ctx.arc(this.dragX, this.dragY, 20, 0, Math.PI*2);
-            ctx.fill();
-
-            ctx.fillStyle = '#fff';
-            ctx.font = '12px Orbitron';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(this.selectedPart[0], this.dragX, this.dragY);
-            ctx.restore();
-        }
     }
 }
 
@@ -3491,45 +3658,27 @@ class MenuState {
     }
 
     enter() {
-        this.menuUI.style.display = 'flex';
-        this.game.resetCreature(); // Reset for background visual
+        if(this.menuUI) this.menuUI.style.display = 'flex';
+        this.game.resetCreature();
 
-        // Initial setup for background if needed
         this.game.camera.zoom = 1.0;
         this.game.camera.x = 0;
         this.game.camera.y = 0;
     }
 
     exit() {
-        this.menuUI.style.display = 'none';
-        this.settingsUI.style.display = 'none';
+        if(this.menuUI) this.menuUI.style.display = 'none';
+        if(this.settingsUI) this.settingsUI.style.display = 'none';
     }
 
     update(dt) {
-        // Just update background elements for visual flair
-        this.game.updateBackgroundOnly(dt);
-
-        // Maybe slowly rotate camera or drift
-        this.game.bgRays.angle += dt * 0.05;
+        // Use new Background system
+        this.game.background.update(dt, this.game.camera);
     }
 
     render(ctx) {
-        // Draw background
-        const head = this.game.creature.points[0];
-        const biome = this.game.biomeManager.getCurrentBiome(0, 0);
-
-        // Clear
-        const bgGrad = ctx.createLinearGradient(0, 0, 0, this.game.height);
-        bgGrad.addColorStop(0, '#000000');
-        bgGrad.addColorStop(1, biome.color);
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, this.game.width, this.game.height);
-
-        // Draw Ambient Layers
-        this.game.renderBackgroundLayers(ctx);
-
-        // Vignette
-        this.game.lighting.render(ctx);
+        // Use new Background system
+        this.game.background.render(ctx, '#001020'); // Default Deep Blue
     }
 }
 
@@ -3545,13 +3694,10 @@ class PlayState {
         this.hud = document.getElementById('game-hud');
         this.paused = false;
 
-        // Tier Tracking
         this.currentTier = 1;
         this.maxEntities = 15;
-
-        // Apex Predator Timer
-        this.apexTimer = 30.0; // Seconds
-        this.activeApex = null; // Track current apex
+        this.apexTimer = 30.0;
+        this.activeApex = null;
     }
 
     enter(params) {
@@ -3570,13 +3716,16 @@ class PlayState {
     }
 
     calculateTier() {
+        // Infinite Scale Tier Logic
         const mass = this.game.creature.gameStats.mass;
-        let newTier = 1;
-        if (mass >= 500) newTier = 3;
-        else if (mass >= 50) newTier = 2;
+        const newTier = Math.floor(Math.log10(Math.max(10, mass))) || 1;
 
-        if (newTier !== this.currentTier) {
+        if (newTier > this.currentTier) {
             this.currentTier = newTier;
+            // Trigger Evolutionary Leap (Brain State)
+            if (this.currentTier > 1) {
+                this.game.stateMachine.change('brain');
+            }
         }
     }
 
@@ -3594,13 +3743,14 @@ class PlayState {
 
         this.calculateTier();
 
+        // Scale Logic: Player radius grows with Mass
         const baseScale = Math.sqrt(creature.gameStats.mass / 10);
         creature.points.forEach(p => { if(p.baseRadius) p.radius = p.baseRadius * baseScale; });
         creature.constraints.forEach(c => { if(c.baseLength) c.length = c.baseLength * baseScale; });
 
         const head = creature.points[0];
-
         const inputVec = game.input.getVector();
+        // Adjust physics force to feel consistent at scale
         const swimForce = (creature.stats.speed + 1000) * baseScale;
         const turnSpeed = creature.stats.turnSpeed * 2.0;
 
@@ -3619,21 +3769,24 @@ class PlayState {
                 const dashForce = 5000 * baseScale;
                 head.x += Math.cos(game.headAngle) * dashForce * dt;
                 head.y += Math.sin(game.headAngle) * dashForce * dt;
-                game.spawnParticles(head.x, head.y, '#fff', 20, 300);
+                game.spawnParticles(head.x, head.y, '#fff', 20, 300 * baseScale);
                 if(game.settings.audioEnabled) game.audio.playDash();
                 if(navigator.vibrate) navigator.vibrate(50);
             }
         }
 
         game.physics.update(creature.points, creature.constraints, dt);
-        game.updateBackgroundOnly(dt);
+
+        // Background Update (Pass Camera)
+        game.background.update(dt, game.camera);
+
         this.manageEntities(dt, head, baseScale);
         game.boidManager.update(dt, game.enemies);
 
         if (game.mate) {
             game.mate.update(dt, head, head.radius);
             const dist = Math.hypot(head.x - game.mate.points[0].x, head.y - game.mate.points[0].y);
-            if (dist < head.radius + game.mate.points[0].radius + 20) {
+            if (dist < head.radius + game.mate.points[0].radius + 20 * baseScale) {
                 if (game.settings.audioEnabled) game.audio.playTone(600, 'sine', 1.0);
                 game.editor.toggle(true);
             }
@@ -3664,7 +3817,6 @@ class PlayState {
                      creature.gameStats.health -= dmg;
                      creature.lastDamageTime = Date.now();
                      if (dmg > 0 && navigator.vibrate) navigator.vibrate(100);
-
                      const angle = Math.atan2(head.y - e.points[0].y, head.x - e.points[0].x);
                      head.vx += Math.cos(angle) * 500; head.vy += Math.sin(angle) * 500;
                 }
@@ -3674,7 +3826,6 @@ class PlayState {
                      const dmg = Math.max(0, creature.stats.damage + velocityDmg - e.stats.defense);
                      e.health -= dmg;
                      if(e.onHit) e.onHit();
-
                      const angle = Math.atan2(e.points[0].y - head.y, e.points[0].x - head.x);
                      e.points[0].vx += Math.cos(angle) * 500; e.points[0].vy += Math.sin(angle) * 500;
                 }
@@ -3682,20 +3833,27 @@ class PlayState {
                 game.hitstop = 0.05;
                 const mx = (head.x + e.points[0].x) / 2;
                 const my = (head.y + e.points[0].y) / 2;
-                game.spawnParticles(mx, my, '#ff0044', 5, 200);
+                game.spawnParticles(mx, my, '#ff0044', 5, 200 * baseScale);
                 game.camera.x += (Math.random()-0.5) * 10; game.camera.y += (Math.random()-0.5) * 10;
                 if(game.settings.audioEnabled) game.audio.playTone(100, 'sawtooth', 0.1, mx, my, game.camera);
 
                 if (e.health <= 0) {
-                     game.spawnParticles(mx, my, '#ffaa00', 10, 400);
+                     game.spawnParticles(mx, my, '#ffaa00', 10, 400 * baseScale);
+                     // Meat scaling
                      game.spawnMeat(mx, my, 3 + Math.floor(e.scale));
                      game.debris.push(new Debris(e.points, e.constraints, e.color, 4));
                      game.distortion.addShockwave(mx, my);
                      if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
-                     const drop = game.progression.checkDrop(null, e.difficulty);
-                     if (drop) game.triggerUnlock(drop);
 
-                     if (e.persistent) this.activeApex = null; // Apex died
+                     // Boss Kill Logic
+                     if (e.bossType === 'Leviathan') {
+                         this.game.stateMachine.change('emergence');
+                         return;
+                     }
+
+                     const drop = game.progression.checkDrop(null, e.tier * 2);
+                     if (drop) game.triggerUnlock(drop);
+                     if (e.persistent) this.activeApex = null;
                      game.enemies.splice(i, 1);
                      continue;
                 }
@@ -3717,14 +3875,14 @@ class PlayState {
 
                 if (canEat) {
                     game.food.splice(i, 1);
+                    // Value scales with size? Usually yes, but keep it simple for now
                     const dnaValue = f.dnaValue || 0.2;
-                    // Reduced growth speed (Balance)
-                    creature.gameStats.dna += dnaValue * 0.5; // Half DNA gain
-                    creature.gameStats.mass += 0.2 * dnaValue; // Slower mass gain
+                    creature.gameStats.dna += dnaValue * 0.5;
+                    creature.gameStats.mass += 0.2 * dnaValue;
                     creature.gameStats.health = Math.min(creature.gameStats.maxHealth, creature.gameStats.health + 5);
                     if(game.settings.audioEnabled) game.audio.playEat(f.x, f.y, game.camera);
                     if(navigator.vibrate) navigator.vibrate(20);
-                    game.spawnParticles(f.x, f.y, f.color, 5, 100);
+                    game.spawnParticles(f.x, f.y, f.color, 5, 100 * baseScale);
                 }
             }
         }
@@ -3756,26 +3914,56 @@ class PlayState {
     manageEntities(dt, playerHead, playerScale) {
         const game = this.game;
 
-        // --- Apex Predator Logic ---
-        this.apexTimer -= dt;
-        if (this.apexTimer <= 0 && !this.activeApex) {
-            this.apexTimer = 30.0; // Reset
+        // --- Boss Logic (Leviathan at Tier 5) ---
+        if (this.currentTier >= 5 && !this.game.bossActive) {
+            // Spawn Leviathan
             const angle = Math.random() * Math.PI * 2;
-            const dist = 1200 * playerScale;
+            const dist = 2000 * playerScale;
             const x = playerHead.x + Math.cos(angle) * dist;
             const y = playerHead.y + Math.sin(angle) * dist;
 
-            const apex = new Enemy(x, y, (this.currentTier + 1) * 3, game.physics, 'hunter');
-            apex.scale = (this.currentTier + 1) * 1.5;
+            // Leviathan is Tier 6 equivalent
+            const leviathan = new Enemy(x, y, 6, game.physics, 'titan');
+            leviathan.bossType = 'Leviathan';
+            leviathan.color = '#ff00ff';
+            leviathan.scale = 10; // Massive
+            leviathan.health = 5000;
+            leviathan.maxHealth = 5000;
+            leviathan.persistent = true;
+            leviathan.stats.damage = 50;
+            // Add many weapons
+            for(let i=0; i<10; i++) leviathan.parts.push({ type: 'Spike', boneIndex: i, side: 1 });
+
+            game.enemies.push(leviathan);
+            this.game.bossActive = true;
+
+            const warning = document.createElement('div');
+            warning.style = "position:absolute; top:20%; width:100%; text-align:center; color:#f0f; font-size:2rem; font-family:Orbitron; animation:pulse 0.5s infinite;";
+            warning.innerText = "WARNING: LEVIATHAN DETECTED";
+            document.body.appendChild(warning);
+            setTimeout(() => warning.remove(), 4000);
+
+            if(game.settings.audioEnabled) game.audio.playTone(50, 'sawtooth', 3.0);
+        }
+
+        // --- Apex Predator Logic ---
+        this.apexTimer -= dt;
+        if (this.apexTimer <= 0 && !this.activeApex && !this.game.bossActive) {
+            this.apexTimer = 30.0;
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 1200 * playerScale; // Spawn far away relative to size
+            const x = playerHead.x + Math.cos(angle) * dist;
+            const y = playerHead.y + Math.sin(angle) * dist;
+
+            // Apex is always 1 tier higher
+            const apexTier = this.currentTier + 1;
+            const apex = new Enemy(x, y, apexTier, game.physics, 'hunter');
             apex.color = '#ff0000';
             apex.state = 'chase';
-            apex.health = 100 * this.currentTier;
-            apex.parts.push({type: 'Jaws', boneIndex: 0, side: 0});
-            apex.persistent = true; // Important!
+            apex.persistent = true;
             game.enemies.push(apex);
             this.activeApex = apex;
 
-            // Warning
             game.distortion.addShockwave(x, y);
             const warning = document.createElement('div');
             warning.style = "position:absolute; top:20%; width:100%; text-align:center; color:red; font-family:Orbitron; animation:pulse 1s infinite;";
@@ -3785,13 +3973,14 @@ class PlayState {
         }
 
         const cam = game.camera;
+        // View Radius in World Units
         const viewRadiusW = (game.width / 2) / cam.zoom;
         const viewRadiusH = (game.height / 2) / cam.zoom;
         const viewRadius = Math.max(viewRadiusW, viewRadiusH);
 
-        const spawnMin = viewRadius + 100;
-        const spawnMax = spawnMin + 500;
-        const despawnDist = spawnMax + 200;
+        const spawnMin = viewRadius + (100 * playerScale);
+        const spawnMax = spawnMin + (500 * playerScale);
+        const despawnDist = spawnMax + (200 * playerScale);
 
         for (let i = game.enemies.length - 1; i >= 0; i--) {
             const e = game.enemies[i];
@@ -3801,7 +3990,8 @@ class PlayState {
                 game.enemies.splice(i, 1);
                 continue;
             }
-            if (e.tier < this.currentTier - 1 && !e.persistent) {
+            // Logic: Despawn enemies that are too small (2 tiers below)
+            if (e.tier < this.currentTier - 2 && !e.persistent) {
                 game.enemies.splice(i, 1);
             }
         }
@@ -3814,13 +4004,13 @@ class PlayState {
         const x = playerHead.x + Math.cos(angle) * dist;
         const y = playerHead.y + Math.sin(angle) * dist;
 
+        // Weighted Spawn Tier
+        // Mostly current tier, some lower, rare higher
         let spawnTier = this.currentTier;
         const r = Math.random();
         if (r < 0.6) spawnTier = this.currentTier;
         else if (r < 0.9 && this.currentTier > 1) spawnTier = this.currentTier - 1;
         else if (r < 1.0) spawnTier = this.currentTier + 1;
-
-        if (spawnTier > 3) spawnTier = 3;
 
         const type = Math.random() > 0.5 ? 'grazer' : 'hunter';
 
@@ -3828,34 +4018,24 @@ class PlayState {
             const count = 3 + Math.floor(Math.random() * 3);
             if (game.enemies.length + count > this.maxEntities) return;
             const flock = game.boidManager.createFlock(x, y, count, spawnTier, 'grazer');
-            flock.forEach(e => {
-                e.tier = spawnTier; e.scale = spawnTier;
-                e.health *= spawnTier; e.stats.damage *= spawnTier;
-            });
             game.enemies.push(...flock);
         } else {
-            const e = new Enemy(x, y, spawnTier * 2, game.physics, 'hunter');
-            e.tier = spawnTier; e.scale = spawnTier;
-            e.health *= spawnTier; e.stats.damage *= spawnTier;
+            const e = new Enemy(x, y, spawnTier, game.physics, 'hunter');
             game.enemies.push(e);
         }
     }
 
     resolveCombat(player, enemy) {
         let result = { hit: false, playerHit: false, enemyHit: false, impulse: 0 };
-
         const weaponParts = player.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws' || p.type === 'Poison');
         for (let part of weaponParts) {
             const bone = player.points[part.boneIndex];
             if (!bone) continue;
             const range = bone.radius + 20;
-
             for (let ePoint of enemy.points) {
                 const dist = Math.hypot(bone.x - ePoint.x, bone.y - ePoint.y);
                 if (dist < range + ePoint.radius) {
-                    result.hit = true;
-                    result.enemyHit = true;
-                    // Calculate Impulse
+                    result.hit = true; result.enemyHit = true;
                     const relVx = (bone.vx || 0) - (ePoint.vx || 0);
                     const relVy = (bone.vy || 0) - (ePoint.vy || 0);
                     result.impulse = Math.hypot(relVx, relVy);
@@ -3870,12 +4050,10 @@ class PlayState {
             const bone = enemy.points[part.boneIndex];
             if (!bone) continue;
             const range = bone.radius + 20;
-
             for (let pPoint of player.points) {
                 const dist = Math.hypot(bone.x - pPoint.x, bone.y - pPoint.y);
                 if (dist < range + pPoint.radius) {
-                    result.hit = true;
-                    result.playerHit = true;
+                    result.hit = true; result.playerHit = true;
                     const relVx = (bone.vx || 0) - (pPoint.vx || 0);
                     const relVy = (bone.vy || 0) - (pPoint.vy || 0);
                     result.impulse = Math.hypot(relVx, relVy);
@@ -3884,7 +4062,6 @@ class PlayState {
             }
             if (result.playerHit) break;
         }
-
         return result;
     }
 
@@ -3895,25 +4072,30 @@ class PlayState {
         }
 
         const game = this.game;
+
+        // Update Lighting Map
         if (game.settings.fxEnabled) game.lighting.update(game.camera, { player: game.creature, enemies: game.enemies, food: game.food });
 
         const head = game.creature.points[0];
         const biome = game.biomeManager.getCurrentBiome(head ? head.x : 0, head ? head.y : 0);
-        const bgGrad = ctx.createLinearGradient(0, 0, 0, game.height);
-        bgGrad.addColorStop(0, '#000000');
-        bgGrad.addColorStop(1, biome.color);
-        ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, game.width, game.height);
 
-        this.renderParallax(ctx);
+        // Background Rendering (Deep Blue + Particles)
+        game.background.render(ctx, biome.color);
 
         game.camera.apply(ctx);
+
+        // Creatures & Objects
         if(game.settings.fxEnabled) ctx.globalCompositeOperation = 'lighter';
+
         game.food.forEach(f => {
             ctx.fillStyle = f.color;
             ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI*2); ctx.fill();
         });
+
         ctx.globalCompositeOperation = 'source-over';
+
         game.debris.forEach(d => d.render(ctx));
+
         game.particles.forEach(p => {
             ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
             ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); ctx.fill();
@@ -3925,9 +4107,13 @@ class PlayState {
         });
 
         if (game.mate) game.renderer.drawCreature(game.mate, 0);
+
+        // Player
         game.renderer.drawCreature(game.creature, game.headAngle);
+
         game.camera.restore(ctx);
 
+        // Overlays
         game.lighting.render(ctx);
         game.distortion.render(ctx, game.camera);
         game.sonar.render(ctx, game.camera);
@@ -3946,13 +4132,11 @@ class PlayState {
         const w = game.width;
         const h = game.height;
 
-        // Check if offscreen
         if (screenPos.x < 0 || screenPos.x > w || screenPos.y < 0 || screenPos.y > h) {
             const cx = w/2;
             const cy = h/2;
             const angle = Math.atan2(screenPos.y - cy, screenPos.x - cx);
             const r = Math.min(w, h)/2 - 40;
-
             const px = cx + Math.cos(angle) * r;
             const py = cy + Math.sin(angle) * r;
 
@@ -3965,7 +4149,6 @@ class PlayState {
             ctx.fill();
             ctx.restore();
 
-            // Text Pulse
             const pulse = (Date.now() % 1000) / 1000;
             if (pulse < 0.5) {
                 ctx.fillStyle = '#f00';
@@ -3976,55 +4159,16 @@ class PlayState {
         }
     }
 
-    renderParallax(ctx) {
-        const game = this.game;
-        const cam = game.camera;
-        const cx = game.width / 2;
-        const cy = game.height / 2;
-
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.scale(1.0, 1.0);
-        ctx.translate(-cam.x * 0.05, -cam.y * 0.05);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        game.bgDeep.forEach(p => {
-            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
-        });
-        ctx.restore();
-
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.scale(cam.zoom * 0.5, cam.zoom * 0.5);
-        ctx.translate(-cam.x * 0.2, -cam.y * 0.2);
-        ctx.fillStyle = 'rgba(100, 255, 255, 0.1)';
-        game.bgMid.forEach(p => {
-            ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 2, 0, Math.PI*2); ctx.fill();
-        });
-        ctx.restore();
-
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.scale(cam.zoom * 1.5, cam.zoom * 1.5);
-        ctx.translate(-cam.x * 1.5, -cam.y * 1.5);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-        game.bgFore.forEach(p => {
-            ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3, 0, Math.PI*2); ctx.fill();
-        });
-        ctx.restore();
-    }
-
     drawHUD(ctx) {
         const game = this.game;
         const dna = Math.floor(game.creature.gameStats.dna);
         const w = game.width;
 
-        // Ensure Evolve Button Visibility Logic
         const evolveBtn = document.getElementById('evolve-btn');
         if (evolveBtn) {
             if (dna >= 10 && !game.editor.active) {
                 evolveBtn.style.display = 'block';
                 evolveBtn.innerText = `EVOLVE (10 DNA)`;
-                // Pulse effect
                 const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 1.0;
                 evolveBtn.style.transform = `scale(${pulse})`;
             } else {
@@ -4033,29 +4177,34 @@ class PlayState {
         }
 
         ctx.save();
-        ctx.fillStyle = 'rgba(0, 10, 30, 0.8)';
+        // Transparent HUD top bar
+        const grad = ctx.createLinearGradient(0,0,0,60);
+        grad.addColorStop(0, 'rgba(0,0,0,0.8)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, 60);
-        ctx.beginPath();
-        ctx.moveTo(0, 60); ctx.lineTo(w, 60);
-        ctx.strokeStyle = '#00aaff';
-        ctx.lineWidth = 1;
-        ctx.stroke();
 
         // Text
         ctx.fillStyle = '#00aaff';
         ctx.font = '20px Orbitron';
+        ctx.shadowColor = '#00aaff';
+        ctx.shadowBlur = 5;
         ctx.textAlign = 'left';
-        ctx.fillText(`DNA: ${dna} / 10`, 20, 38); // Show target
+        ctx.fillText(`DNA: ${dna} / 10`, 20, 38);
 
         ctx.textAlign = 'right';
         ctx.fillText(`TIER: ${this.currentTier}`, w - 20, 38);
+        ctx.shadowBlur = 0;
 
         // Progress Bar
         const progress = Math.min(1.0, dna / 10.0);
-        ctx.fillStyle = '#004444';
-        ctx.fillRect(20, 45, 200, 5);
-        ctx.fillStyle = '#00ff00';
-        ctx.fillRect(20, 45, 200 * progress, 5);
+        ctx.fillStyle = 'rgba(0, 100, 100, 0.5)';
+        ctx.fillRect(20, 45, 200, 4);
+        ctx.fillStyle = '#00ffff';
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur = 10;
+        ctx.fillRect(20, 45, 200 * progress, 4);
+        ctx.shadowBlur = 0;
 
         ctx.restore();
     }
@@ -4113,32 +4262,21 @@ class IntroState {
     constructor(game) {
         this.game = game;
         this.time = 0;
-        this.phase = 'space'; // space, entry, impact, submerged, transition
+        this.phase = 'space'; // space, entry, impact, sink, awaken
         this.stars = [];
-        this.bubbles = [];
-        this.planetScale = 0;
-        this.impactFlash = 0;
+        this.shard = null; // The specific rock we follow
+        this.particles = []; // General FX
 
-        // Create DOM Elements for Text
+        // DOM Overlay for Text
         this.titleOverlay = document.createElement('div');
         this.titleOverlay.className = 'intro-title';
         this.titleOverlay.style = `
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 100%;
-            text-align: center;
-            color: rgba(0, 255, 255, 0);
-            font-family: Orbitron;
-            font-size: clamp(1.5rem, 5vw, 3rem);
-            white-space: normal;
-            word-wrap: break-word;
-            pointer-events: none;
-            z-index: 50;
-            transition: opacity 1s;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 100%; text-align: center; color: rgba(0, 255, 255, 0);
+            font-family: Orbitron; font-size: clamp(1.5rem, 5vw, 3rem);
+            pointer-events: none; z-index: 50; transition: opacity 2s;
         `;
-        this.titleOverlay.innerText = "PHASE 1: THE PRIMORDIAL SOUP";
+        this.titleOverlay.innerText = "PHASE 1: PANSPERMIA";
         document.body.appendChild(this.titleOverlay);
 
         this.skipBtn = document.createElement('button');
@@ -4151,12 +4289,16 @@ class IntroState {
         this.skipBtn.onclick = () => this.game.stateMachine.change('genesis');
         document.body.appendChild(this.skipBtn);
 
-        // Init Stars
-        for(let i=0; i<100; i++) {
+        this.initStars();
+    }
+
+    initStars() {
+        this.stars = [];
+        for(let i=0; i<200; i++) {
             this.stars.push({
-                x: (Math.random()-0.5) * window.innerWidth,
-                y: (Math.random()-0.5) * window.innerHeight,
-                z: Math.random() * 2 // depth
+                x: (Math.random()-0.5) * window.innerWidth * 2,
+                y: (Math.random()-0.5) * window.innerHeight * 2,
+                z: Math.random() * 2 + 0.1
             });
         }
     }
@@ -4164,19 +4306,23 @@ class IntroState {
     enter() {
         this.time = 0;
         this.phase = 'space';
-        this.game.audio.startAmbient(); // Ensure audio is ready
+        this.game.audio.startAmbient();
         document.getElementById('game-hud').style.display = 'none';
-
-        // Hide Main Menu if visible
         document.getElementById('main-menu').style.display = 'none';
         this.skipBtn.style.display = 'block';
         this.titleOverlay.style.color = 'rgba(0, 255, 255, 0)';
+        this.titleOverlay.innerText = "PHASE 1: PANSPERMIA";
+
+        // Reset Camera
+        this.game.camera.x = 0;
+        this.game.camera.y = 0;
+        this.game.camera.zoom = 1;
     }
 
     exit() {
         this.skipBtn.style.display = 'none';
         this.titleOverlay.style.display = 'none';
-        this.titleOverlay.remove(); // Cleanup DOM
+        this.titleOverlay.remove();
         this.skipBtn.remove();
     }
 
@@ -4184,58 +4330,92 @@ class IntroState {
         this.time += dt;
 
         if (this.phase === 'space') {
-            // Move stars
+            // Comet Flying
+            // Stars move fast (Parallax)
             this.stars.forEach(s => {
                 s.z -= dt * 0.5;
                 if (s.z <= 0) s.z += 2;
             });
 
-            // Planet grows
-            if (this.time > 2.0) {
-                this.planetScale += dt * 0.5;
+            // Camera shake builds up
+            if (this.time > 3.0) {
+                 this.game.camera.x = (Math.random()-0.5) * (this.time - 3) * 2;
+                 this.game.camera.y = (Math.random()-0.5) * (this.time - 3) * 2;
             }
 
-            if (this.planetScale > 5.0) {
+            if (this.time > 5.0) {
                 this.phase = 'entry';
-                this.time = 0; // Reset local time for next phase
-            }
-        }
-        else if (this.phase === 'entry') {
-            // Shake and burn
-            this.planetScale += dt * 10.0; // Fast zoom into surface
-
-            if (this.time > 1.5) {
-                this.phase = 'impact';
-                this.impactFlash = 1.0;
                 this.time = 0;
                 if(navigator.vibrate) navigator.vibrate(200);
             }
         }
-        else if (this.phase === 'impact') {
-            this.impactFlash -= dt * 0.5;
-            if (this.time > 2.0) {
-                this.phase = 'submerged';
+        else if (this.phase === 'entry') {
+            // Screen turns white/red
+            this.game.camera.x = (Math.random()-0.5) * 20;
+            this.game.camera.y = (Math.random()-0.5) * 20;
+
+            if (this.time > 1.5) {
+                this.phase = 'impact';
                 this.time = 0;
-                // Initialize bubbles
-                for(let i=0; i<50; i++) {
-                    this.bubbles.push({
-                        x: Math.random() * this.game.width,
-                        y: this.game.height + Math.random() * 500,
+                // Spawn Shards
+                this.shard = { x: 0, y: -this.game.height, vx: 0, vy: 500, r: 20, heat: 1.0 };
+                if(navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            }
+        }
+        else if (this.phase === 'impact') {
+            // Flash fades
+            if (this.time > 0.5) {
+                this.phase = 'sink';
+                this.time = 0;
+                this.game.camera.zoom = 1.0;
+
+                // Init sinking particles
+                for(let i=0; i<20; i++) {
+                    this.particles.push({
+                        x: (Math.random()-0.5) * 400,
+                        y: -this.game.height/2 - Math.random() * 500,
+                        vx: (Math.random()-0.5) * 50,
+                        vy: 100 + Math.random() * 200,
                         r: 2 + Math.random() * 5,
-                        v: 50 + Math.random() * 100
+                        life: 10
                     });
                 }
             }
         }
-        else if (this.phase === 'submerged') {
-            // Bubbles rise
-            this.bubbles.forEach(b => {
-                b.y -= b.v * dt;
-                b.x += Math.sin(b.y * 0.05) * 1;
+        else if (this.phase === 'sink') {
+            // Follow Shard
+            this.shard.vy *= 0.95; // Drag
+            this.shard.y += this.shard.vy * dt;
+            this.shard.heat -= dt * 0.2; // Cooling
+
+            // Camera follow with lag
+            this.game.camera.y += (this.shard.y - this.game.camera.y) * 0.1;
+
+            // Particles
+            this.particles.forEach(p => {
+                p.y += p.vy * dt;
+                p.x += p.vx * dt;
             });
 
-            // Camera pans down or we fade in the creature
+            // Text Fade In
+            if (this.time > 1.0 && this.time < 1.5) {
+                 this.titleOverlay.style.color = 'rgba(0, 255, 255, 1)';
+            }
             if (this.time > 4.0) {
+                 this.titleOverlay.style.color = 'rgba(0, 255, 255, 0)';
+            }
+
+            if (this.time > 6.0) {
+                this.phase = 'awaken';
+                this.time = 0;
+            }
+        }
+        else if (this.phase === 'awaken') {
+            // Zoom in on shard
+            this.game.camera.zoom += dt * 0.5;
+
+            if (this.time > 2.0) {
+                // Break open
                 this.game.stateMachine.change('genesis');
             }
         }
@@ -4250,75 +4430,113 @@ class IntroState {
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, w, h);
 
-        if (this.phase === 'space' || this.phase === 'entry') {
+        if (this.phase === 'space') {
             // Draw Stars
             ctx.fillStyle = '#fff';
             this.stars.forEach(s => {
                 const k = 128.0 / s.z;
                 const px = s.x * k + cx;
                 const py = s.y * k + cy;
-
                 if (px >= 0 && px <= w && py >= 0 && py <= h) {
-                    const size = (1 - s.z / 2) * 3;
+                    const size = (1 - s.z / 3) * 2;
                     ctx.beginPath();
                     ctx.arc(px, py, Math.max(0.1, size), 0, Math.PI*2);
                     ctx.fill();
                 }
             });
 
-            // Draw Planet
-            if (this.planetScale > 0) {
-                const radius = 50 * Math.pow(this.planetScale, 2);
-                const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-                grad.addColorStop(0, '#000022');
-                grad.addColorStop(0.5, '#0044aa');
-                grad.addColorStop(1, '#0088ff');
-
+            // Draw Planet Growing
+            const scale = Math.pow(this.time, 3) * 0.05;
+            if (scale > 0.1) {
+                const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 100 * scale);
+                grad.addColorStop(0, '#0044aa');
+                grad.addColorStop(1, '#000022');
                 ctx.fillStyle = grad;
                 ctx.beginPath();
-                ctx.arc(cx, cy, radius, 0, Math.PI*2);
+                ctx.arc(cx, cy, 100 * scale, 0, Math.PI*2);
                 ctx.fill();
             }
-        }
 
-        if (this.phase === 'entry') {
-             // Red heat burn overlay
-             ctx.fillStyle = `rgba(255, 100, 0, ${Math.min(0.5, this.time * 0.5)})`;
+            // Draw Comet (Line towards center)
+            const cometDist = 500 - this.time * 100;
+            if (cometDist > 0) {
+                 ctx.strokeStyle = '#fff';
+                 ctx.lineWidth = 2;
+                 ctx.beginPath();
+                 ctx.moveTo(cx, cy);
+                 ctx.lineTo(cx + cometDist, cy - cometDist); // Diagonal
+                 ctx.stroke();
+
+                 // Head
+                 ctx.fillStyle = '#fff';
+                 ctx.beginPath();
+                 ctx.arc(cx + cometDist, cy - cometDist, 3, 0, Math.PI*2);
+                 ctx.fill();
+            }
+        }
+        else if (this.phase === 'entry') {
+             // Red/White noise
+             ctx.fillStyle = `rgba(255, ${Math.random()*255}, ${Math.random()*200}, 1)`;
              ctx.fillRect(0, 0, w, h);
-
-             // Shake
-             ctx.save();
-             ctx.translate((Math.random()-0.5)*20, (Math.random()-0.5)*20);
-             ctx.restore();
         }
-
-        if (this.phase === 'impact') {
-            ctx.fillStyle = `rgba(255, 255, 255, ${this.impactFlash})`;
+        else if (this.phase === 'impact') {
+            const alpha = 1.0 - (this.time * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
             ctx.fillRect(0, 0, w, h);
         }
-
-        if (this.phase === 'submerged') {
-            // Deep Blue
+        else if (this.phase === 'sink' || this.phase === 'awaken') {
+            // Abyss Gradient
             const grad = ctx.createLinearGradient(0, 0, 0, h);
             grad.addColorStop(0, '#000011');
             grad.addColorStop(1, '#001133');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, w, h);
 
-            // Bubbles
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-            this.bubbles.forEach(b => {
+            this.game.camera.apply(ctx);
+
+            // Draw Shard
+            if (this.shard) {
+                // Glow if hot
+                if (this.shard.heat > 0) {
+                    ctx.shadowColor = '#ff4400';
+                    ctx.shadowBlur = 20 * this.shard.heat;
+                    ctx.fillStyle = `rgba(50, 20, 20, 1)`;
+                } else {
+                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = '#222';
+                }
+
+                // If awaken, blue glow cracks
+                if (this.phase === 'awaken') {
+                     ctx.shadowColor = '#00ffff';
+                     ctx.shadowBlur = 20 * this.time;
+                     ctx.strokeStyle = '#00ffff';
+                     ctx.lineWidth = 2;
+                }
+
                 ctx.beginPath();
-                ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+                // Irregular rock shape
+                const r = this.shard.r;
+                ctx.moveTo(this.shard.x - r, this.shard.y - r);
+                ctx.lineTo(this.shard.x + r, this.shard.y - r + 5);
+                ctx.lineTo(this.shard.x + r - 5, this.shard.y + r);
+                ctx.lineTo(this.shard.x - r + 5, this.shard.y + r - 5);
+                ctx.closePath();
+                ctx.fill();
+                if (this.phase === 'awaken') ctx.stroke();
+
+                ctx.shadowBlur = 0;
+            }
+
+            // Draw other particles
+            ctx.fillStyle = '#444';
+            this.particles.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
                 ctx.fill();
             });
 
-            // Text: "PHASE 1: THE AWAKENING"
-            if (this.time > 1.0) {
-                // Fade in DOM text
-                const alpha = Math.min(1, (this.time - 1.0));
-                this.titleOverlay.style.color = `rgba(0, 255, 255, ${alpha})`;
-            }
+            this.game.camera.restore(ctx);
         }
     }
 }
@@ -4449,7 +4667,215 @@ class GenesisState {
 }
 
 
+// --- js/states/brain.js ---
+class BrainState {
+    constructor(game) {
+        this.game = game;
+        this.perks = [
+            { id: 'speed', name: 'Rapid Mitosis', desc: '+20% Speed', stat: 'speed', val: 0.2 },
+            { id: 'damage', name: 'Toxic Spikes', desc: '+20% Damage', stat: 'damage', val: 0.2 },
+            { id: 'armor', name: 'Thick Membrane', desc: '+20% Health', stat: 'health', val: 0.2 },
+            { id: 'view', name: 'Compound Eye', desc: '+30% Vision', stat: 'vision', val: 0.3 },
+            { id: 'efficiency', name: 'Metabolism', desc: '+20% DNA Gain', stat: 'dna', val: 0.2 }
+        ];
+        this.choices = [];
+
+        this.overlay = document.createElement('div');
+        this.overlay.id = 'brain-overlay';
+        this.overlay.style = `
+            display:none; position:absolute; top:0; left:0; width:100%; height:100%;
+            background:rgba(0,10,20,0.95); z-index:500; flex-direction:column;
+            align-items:center; justify-content:center;
+        `;
+        document.body.appendChild(this.overlay);
+    }
+
+    enter() {
+        this.overlay.style.display = 'flex';
+        this.overlay.innerHTML = `
+            <h1 style="color:#0ff; font-family:Orbitron; margin-bottom:10px;">EVOLUTIONARY LEAP</h1>
+            <p style="color:#aaa; font-family:Orbitron; margin-bottom:30px;">Choose a mutation path</p>
+            <div id="perk-container" style="display:flex; gap:20px; flex-wrap:wrap; justify-content:center;"></div>
+        `;
+
+        // Pick 3 random perks
+        this.choices = [];
+        const pool = [...this.perks];
+        for(let i=0; i<3; i++) {
+            if(pool.length === 0) break;
+            const idx = Math.floor(Math.random() * pool.length);
+            this.choices.push(pool[idx]);
+            pool.splice(idx, 1);
+        }
+
+        const container = document.getElementById('perk-container');
+        this.choices.forEach(perk => {
+            const btn = document.createElement('div');
+            btn.className = 'perk-card';
+            btn.style = `
+                width:150px; padding:20px; background:rgba(0,30,50,0.8); border:1px solid #0ff;
+                border-radius:10px; text-align:center; cursor:pointer; transition:transform 0.2s;
+            `;
+            btn.innerHTML = `
+                <h3 style="color:#fff; margin:0 0 10px 0;">${perk.name}</h3>
+                <p style="color:#0ff; font-size:0.8rem;">${perk.desc}</p>
+            `;
+            btn.onclick = () => this.selectPerk(perk);
+            container.appendChild(btn);
+        });
+
+        // Pause Game Audio logic?
+        if (this.game.settings.audioEnabled) {
+            // Play "Evolve" sound
+            this.game.audio.playTone(400, 'sine', 1.0);
+        }
+    }
+
+    exit() {
+        this.overlay.style.display = 'none';
+    }
+
+    selectPerk(perk) {
+        // Apply Perk
+        if (perk.stat === 'speed') this.game.creature.stats.speedMult = (this.game.creature.stats.speedMult || 1) + perk.val;
+        if (perk.stat === 'damage') this.game.creature.stats.damageMult = (this.game.creature.stats.damageMult || 1) + perk.val;
+        if (perk.stat === 'health') {
+            this.game.creature.gameStats.maxHealth *= (1 + perk.val);
+            this.game.creature.gameStats.health += 20;
+        }
+
+        // Return to Game
+        this.game.stateMachine.change('playing');
+    }
+
+    update(dt) {
+        // Particles or simple idle anim
+    }
+
+    render(ctx) {
+        // Draw background or brain visual?
+        // DOM overlay covers most of it.
+        // Maybe draw the creature in the background scaling up?
+
+        const w = this.game.width;
+        const h = this.game.height;
+        ctx.fillStyle = '#000510';
+        ctx.fillRect(0, 0, w, h);
+
+        // Draw Creature centered big
+        ctx.save();
+        ctx.translate(w/2, h/2);
+        ctx.scale(2, 2);
+        this.game.renderer.drawCreature(this.game.creature, -Math.PI/2);
+        ctx.restore();
+    }
+}
+
+
+// --- js/states/emergence.js ---
+class EmergenceState {
+    constructor(game) {
+        this.game = game;
+        this.time = 0;
+        this.phase = 'rise'; // rise, breach, end
+
+        this.overlay = document.createElement('div');
+        this.overlay.style = `
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0); z-index: 1000; pointer-events: none; transition: background 5s;
+        `;
+        document.body.appendChild(this.overlay);
+
+        this.credits = document.createElement('div');
+        this.credits.style = `
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; color: #000; font-family: Orbitron; opacity: 0; transition: opacity 2s; z-index: 1001;
+        `;
+        this.credits.innerHTML = `
+            <h1>EMERGENCE</h1>
+            <p>You have left the abyss.</p>
+            <p style="margin-top:20px; font-size:0.8rem;">Thank you for playing.</p>
+            <button id="reset-emergence-btn" style="margin-top:20px; padding:10px; cursor:pointer; pointer-events:auto;">Play Again</button>
+        `;
+        document.body.appendChild(this.credits);
+
+        document.getElementById('reset-emergence-btn').onclick = () => {
+            this.game.resetCreature();
+            this.game.stateMachine.change('menu');
+        };
+    }
+
+    enter() {
+        this.time = 0;
+        this.phase = 'rise';
+        this.overlay.style.background = 'rgba(255, 255, 255, 0)';
+        this.credits.style.opacity = 0;
+        document.getElementById('game-hud').style.display = 'none';
+
+        // Face Up
+        this.game.headAngle = -Math.PI / 2;
+    }
+
+    exit() {
+        this.overlay.style.background = 'rgba(255, 255, 255, 0)';
+        this.overlay.style.display = 'none';
+        this.credits.style.display = 'none';
+    }
+
+    update(dt) {
+        this.time += dt;
+
+        // Swim Up
+        if (this.phase === 'rise') {
+            const head = this.game.creature.points[0];
+            head.y -= 200 * dt; // Rise fast
+            head.x += Math.sin(this.time * 2) * 50 * dt; // Wiggle
+
+            // Camera follow
+            this.game.camera.y = head.y;
+            this.game.camera.x = head.x;
+
+            this.game.physics.update(this.game.creature.points, this.game.creature.constraints, dt);
+
+            // Light gets brighter
+            const brightness = Math.min(1, this.time / 5.0);
+            this.overlay.style.background = `rgba(255, 255, 255, ${brightness})`;
+
+            if (this.time > 5.0) {
+                this.phase = 'breach';
+                this.time = 0;
+                if (this.game.settings.audioEnabled) this.game.audio.playTone(800, 'sine', 2.0); // Heaven sound
+            }
+        }
+        else if (this.phase === 'breach') {
+            this.overlay.style.background = 'white';
+            this.credits.style.opacity = Math.min(1, this.time / 2.0);
+        }
+    }
+
+    render(ctx) {
+        // Draw creature rising into light
+        const w = this.game.width;
+        const h = this.game.height;
+
+        // Background: Light Blue Gradient (Surface)
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, '#fff'); // Sun
+        grad.addColorStop(1, '#00aaff'); // Water
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        this.game.camera.apply(ctx);
+        this.game.renderer.drawCreature(this.game.creature, -Math.PI/2);
+        this.game.camera.restore(ctx);
+    }
+}
+
+
 // --- js/gameloop.js ---
+
+
+
 
 
 
@@ -4517,6 +4943,7 @@ class GameLoop {
         this.assets = new AssetGenerator();
         this.boidManager = new BoidManager(this.physics);
         this.biomeManager = new BiomeManager(this);
+        this.background = new Background(this);
         this.headAngle = 0;
         this.editor = new Editor(this);
         this.skillManager = new SkillManager(this);
@@ -4549,6 +4976,8 @@ class GameLoop {
         this.stateMachine.add('gameover', new GameOverState(this));
         this.stateMachine.add('intro', new IntroState(this));
         this.stateMachine.add('genesis', new GenesisState(this));
+        this.stateMachine.add('brain', new BrainState(this));
+        this.stateMachine.add('emergence', new EmergenceState(this));
 
         this.init();
     }
@@ -4942,6 +5371,7 @@ Ancestral DNA Gained: ${earned}`);
         this.canvas.height = this.height;
         this.camera.resize(this.width, this.height);
         if (this.lighting) this.lighting.resize(this.width, this.height);
+        if (this.background) this.background.resize(this.width, this.height);
     }
 
     spawnFood(count) {

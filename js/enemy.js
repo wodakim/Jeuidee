@@ -1,19 +1,19 @@
 import Stats from './stats.js';
 
 export default class Enemy {
-    constructor(x, y, difficulty, physics, type = 'hunter') {
+    constructor(x, y, tier, physics, type = 'hunter') {
         this.physics = physics;
         this.active = true;
-        this.difficulty = difficulty; // 1 to 10+
+        this.tier = tier; // 1, 2, 3...
         this.type = type; // 'hunter', 'grazer', 'titan'
 
-        // AI & Tier Props
-        this.tier = 1; // Default
-        this.mass = 10; // Default approximation
-        this.persistent = false; // Flag to prevent despawning
-
         // Procedural Generation
-        this.scale = 1 + (difficulty * 0.2); // Growth
+        // Scale Factor: Roughly 3x per tier to match Mass 10x (Sqrt(10) ~ 3.16)
+        this.scale = Math.pow(3, this.tier - 1);
+        this.mass = 10 * this.scale * this.scale; // Mass = Scale^2 * 10
+
+        this.persistent = false;
+
         this.color = type === 'grazer' ? `hsl(${100 + Math.random() * 50}, 70%, 50%)` : `hsl(${Math.random() * 360}, 70%, 50%)`;
 
         // Body
@@ -27,14 +27,18 @@ export default class Enemy {
         this.generateParts();
         this.stats.calculate(this.parts);
 
-        // Base stats scaling
-        this.stats.speed = (300 + difficulty * 50) * (type === 'grazer' ? 0.8 : 1.0);
-        this.stats.damage = 5 + difficulty * 2;
-        this.health = (20 + difficulty * 10) * (type === 'titan' ? 5 : 1);
-        this.maxHealth = this.health;
+        // Stats Scaling
+        // Speed shouldn't scale linearly with size, big things move slower relatively?
+        // But in absolute terms faster.
+        // Let's keep speed manageable.
+        this.stats.speed = (200 + this.tier * 50) * (type === 'grazer' ? 0.8 : 1.0);
 
-        // Mass approximation for AI logic
-        this.mass = 10 * this.scale * this.scale;
+        // Damage scales with Mass
+        this.stats.damage = 5 * this.scale;
+
+        // Health scales with Mass
+        this.health = 20 * this.scale * (type === 'titan' ? 5 : 1);
+        this.maxHealth = this.health;
 
         // AI State
         this.state = 'wander';
@@ -47,45 +51,49 @@ export default class Enemy {
     }
 
     createBody(x, y) {
-        const segs = this.type === 'titan' ? 10 : (3 + Math.floor(this.difficulty / 3));
-        const rad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
+        const segs = this.type === 'titan' ? 8 : (3 + Math.floor(this.tier / 2));
+        // Cap segments to avoid physics explosion
+        const actualSegs = Math.min(10, segs);
 
-        for (let i = 0; i < segs; i++) {
-            const p = this.physics.constructor.createPoint(x, y + i * rad, rad * (1 - i*0.1), 1 + this.difficulty * 0.5);
-            p.baseRadius = rad * (1 - i*0.1);
+        const baseRad = 15 * this.scale * (this.type === 'titan' ? 2 : 1);
+
+        for (let i = 0; i < actualSegs; i++) {
+            // Taper body
+            const r = baseRad * (1 - i * 0.1);
+            const p = this.physics.constructor.createPoint(x, y + i * baseRad, r, this.scale); // Mass scaled
+            p.baseRadius = r;
+            p.radius = r; // Important for renderer
             this.points.push(p);
 
             if (i > 0) {
                 const prev = this.points[i-1];
-                this.constraints.push(this.physics.constructor.createConstraint(prev, p, 0.5, rad));
+                this.constraints.push(this.physics.constructor.createConstraint(prev, p, 0.5, baseRad));
             }
         }
     }
 
     generateParts() {
         if (this.type === 'grazer') {
-            // Grazers have fins mostly
             this.parts.push({ type: 'Fin', boneIndex: 1, side: 1 });
             this.parts.push({ type: 'Fin', boneIndex: 1, side: -1 });
             return;
         }
 
-        const partCount = Math.floor(this.difficulty);
+        const partCount = 1 + Math.floor(this.tier);
+        // Don't add too many parts
+        const maxParts = 5;
+        const count = Math.min(maxParts, partCount);
+
         let hasWeapon = false;
 
-        // Jaws Chance (Frontal Weapon)
         if (this.type !== 'grazer' && Math.random() > 0.6) {
-             this.parts.push({ type: 'Jaws', boneIndex: 0, side: 0 }); // Center head
+             this.parts.push({ type: 'Jaws', boneIndex: 0, side: 0 });
              hasWeapon = true;
         }
 
-        for(let i=0; i<partCount; i++) {
+        for(let i=0; i<count; i++) {
             let type = Math.random() > 0.5 ? 'Fin' : 'Spike';
-
-            // Force weapon if none yet and last part
-            if (!hasWeapon && i === partCount - 1) {
-                type = 'Spike';
-            }
+            if (!hasWeapon && i === count - 1) type = 'Spike';
             if (type === 'Spike') hasWeapon = true;
 
             const boneIndex = Math.floor(Math.random() * (this.points.length));
@@ -114,19 +122,22 @@ export default class Enemy {
             dx = head.x - playerHead.x;
             dy = head.y - playerHead.y;
         } else {
-            // Wander
             dx = this.targetX - head.x;
             dy = this.targetY - head.y;
-            if (Math.hypot(dx, dy) < 50) this.pickState(playerHead, playerMass);
+            if (Math.hypot(dx, dy) < 50 * this.scale) this.pickState(playerHead, playerMass);
         }
 
         const dist = Math.hypot(dx, dy);
         if (dist > 0) {
-            const force = this.stats.speed * dt * dt;
-            const weight = this.type === 'grazer' ? 0.3 : 1.0;
+            const force = this.stats.speed * dt * dt * 50; // Mass is high, need more force?
+            // Physics: F = ma. a = F/m.
+            // If mass scales by Scale^2, and we want similar acceleration, Force must scale by Scale^2.
+            // But we want bigger things to feel heavier (slower accel).
+            // Let's scale force by Scale.
 
-            head.x += (dx / dist) * force * weight;
-            head.y += (dy / dist) * force * weight;
+            const massFactor = this.scale * 20; // Heavier feel
+            head.x += (dx / dist) * (this.stats.speed / massFactor) * dt;
+            head.y += (dy / dist) * (this.stats.speed / massFactor) * dt;
         }
 
         this.physics.update(this.points, this.constraints, dt);
@@ -137,24 +148,19 @@ export default class Enemy {
 
         const head = this.points[0];
         const dist = Math.hypot(playerHead.x - head.x, playerHead.y - head.y);
-        const aggroRange = (this.persistent ? 2000 : 800) * this.scale; // Persistent (Apex) has huge aggro
+        const aggroRange = (this.persistent ? 2000 : 800) * this.scale;
 
-        // Decision Logic
-        // 1. Health Critical? -> Flee
         if (this.health < this.maxHealth * 0.3 && !this.persistent) {
             this.state = 'flee';
-            this.color = '#ffaa00'; // Fear color
             return;
         }
 
-        // 2. Player Nearby?
-        if (dist < aggroRange || this.persistent) { // Apex always chases if persistent
+        if (dist < aggroRange || this.persistent) {
             if (this.type === 'grazer') {
                 this.state = 'flee';
             } else if (this.type === 'titan' || this.persistent) {
                 this.state = 'chase';
             } else {
-                // Hunter: Compare Mass
                 if (playerMass > this.mass * 1.5) {
                     this.state = 'flee';
                 } else if (playerMass < this.mass * 0.8) {
@@ -166,32 +172,46 @@ export default class Enemy {
             }
         } else {
             this.state = 'wander';
-            this.targetX = head.x + (Math.random()-0.5) * 1000;
-            this.targetY = head.y + (Math.random()-0.5) * 1000;
+            const wanderDist = 1000 * this.scale;
+            this.targetX = head.x + (Math.random()-0.5) * wanderDist;
+            this.targetY = head.y + (Math.random()-0.5) * wanderDist;
         }
     }
 
-    // Called when damaged
     onHit(sourceX, sourceY) {
-        // Counter attack logic
         this.health -= 10;
         if (this.health > 0 && this.type !== 'grazer') {
-            this.state = 'chase'; // Aggro
-            this.stateTimer = 5.0; // Focus on player
+            this.state = 'chase';
+            this.stateTimer = 5.0;
         }
     }
 
     render(ctx) {
         if (!this.active) return;
-
         ctx.save();
+
+        // Use new organic rendering for enemies too?
+        // Basic organic: fill circles with soft color
 
         // Body
         for (let i = this.points.length - 1; i >= 0; i--) {
             const p = this.points[i];
+
+            // Soft Gradient
+            const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
+            grad.addColorStop(0, 'rgba(255,255,255,0.5)');
+            grad.addColorStop(0.5, this.color);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius * 1.2, 0, Math.PI*2);
+            ctx.fill();
+
+            // Core
             ctx.fillStyle = this.color;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+            ctx.arc(p.x, p.y, p.radius * 0.5, 0, Math.PI*2);
             ctx.fill();
         }
 
@@ -217,22 +237,27 @@ export default class Enemy {
              ctx.rotate(ang + sideAngle);
              ctx.translate(bone.radius, 0);
 
+             // Scale part by creature scale
+             const pScale = this.scale;
+             ctx.scale(pScale, pScale);
+
              if(part.type === 'Fin') {
-                 ctx.fillStyle = '#fff';
-                 ctx.globalAlpha = 0.5;
+                 ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                 ctx.strokeStyle = '#fff';
+                 ctx.lineWidth = 1;
                  ctx.beginPath();
-                 ctx.moveTo(0,0); ctx.lineTo(15, -10); ctx.lineTo(30, 0);
-                 ctx.fill();
+                 ctx.moveTo(0,0); ctx.quadraticCurveTo(15, -10, 30, 0); ctx.quadraticCurveTo(15, 10, 0, 0);
+                 ctx.fill(); ctx.stroke();
              } else if (part.type === 'Spike') {
                  ctx.fillStyle = '#f00';
                  ctx.beginPath();
                  ctx.moveTo(0, -5); ctx.lineTo(20, 0); ctx.lineTo(0, 5);
                  ctx.fill();
              } else if (part.type === 'Jaws') {
-                 ctx.fillStyle = '#ccc';
+                 ctx.fillStyle = '#eee';
                  ctx.beginPath();
-                 ctx.moveTo(0, -10); ctx.lineTo(20, -5); ctx.lineTo(0, 0);
-                 ctx.moveTo(0, 10); ctx.lineTo(20, 5); ctx.lineTo(0, 0);
+                 ctx.moveTo(0, -5); ctx.lineTo(15, -2); ctx.lineTo(0, 0);
+                 ctx.moveTo(0, 5); ctx.lineTo(15, 2); ctx.lineTo(0, 0);
                  ctx.fill();
              } else if (part.type === 'Eye') {
                  ctx.fillStyle = '#fff';
