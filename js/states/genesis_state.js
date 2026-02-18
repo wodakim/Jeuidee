@@ -5,17 +5,59 @@ export default class GenesisState {
         this.game = game;
         this.ui = document.createElement('div');
         this.ui.id = 'genesis-ui';
-        this.ui.style = `position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); display:none; flex-direction:column; justify-content:center; align-items:center; z-index:200; font-family:Orbitron;`;
+        this.ui.style = `position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); display:none; flex-direction:column; justify-content:center; align-items:center; z-index:200; font-family:Orbitron; overflow-y:auto;`;
 
         this.ui.innerHTML = `
-            <h1 style="color:#fff; text-shadow:0 0 10px #0ff; margin-bottom:50px;">CHOOSE YOUR PATH</h1>
-            <div style="display:flex; gap:50px;">
-                <div id="choice-herb" style="width:200px; height:300px; border:2px solid #0f0; background:rgba(0,50,0,0.5); display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; border-radius:10px; transition:0.3s;">
+            <style>
+                #genesis-container {
+                    display: flex;
+                    gap: 50px;
+                }
+                .genesis-card {
+                    width: 200px;
+                    height: 300px;
+                    border-radius: 10px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    transition: 0.3s;
+                }
+                #genesis-title {
+                    color: #fff;
+                    text-shadow: 0 0 10px #0ff;
+                    margin-bottom: 50px;
+                    text-align: center;
+                }
+                @media (max-width: 600px) {
+                    #genesis-container {
+                        flex-direction: column;
+                        gap: 20px;
+                        width: 100%;
+                        align-items: center;
+                        padding-bottom: 50px;
+                    }
+                    .genesis-card {
+                        width: 80%;
+                        height: auto;
+                        padding: 20px;
+                    }
+                    #genesis-title {
+                        font-size: 1.5rem;
+                        margin-bottom: 20px;
+                        margin-top: 20px;
+                    }
+                }
+            </style>
+            <h1 id="genesis-title">CHOOSE YOUR PATH</h1>
+            <div id="genesis-container">
+                <div id="choice-herb" class="genesis-card" style="border:2px solid #0f0; background:rgba(0,50,0,0.5);">
                     <div style="font-size:4rem; color:#0f0;">🌿</div>
                     <h2 style="color:#0f0;">HERBIVORE</h2>
                     <p style="color:#aaa; font-size:0.8rem; text-align:center; padding:10px;">Filter Feeder.<br>Eats Plants.<br>Peaceful Growth.</p>
                 </div>
-                <div id="choice-carn" style="width:200px; height:300px; border:2px solid #f00; background:rgba(50,0,0,0.5); display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; border-radius:10px; transition:0.3s;">
+                <div id="choice-carn" class="genesis-card" style="border:2px solid #f00; background:rgba(50,0,0,0.5);">
                     <div style="font-size:4rem; color:#f00;">☠️</div>
                     <h2 style="color:#f00;">CARNIVORE</h2>
                     <p style="color:#aaa; font-size:0.8rem; text-align:center; padding:10px;">Predator.<br>Eats Meat.<br>Hunt to Survive.</p>

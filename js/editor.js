@@ -383,8 +383,12 @@ export default class Editor {
         const normDropX = dropVec.x / dropLen;
         const normDropY = dropVec.y / dropLen;
 
-        const dot = spineVec.x * normDropX + spineVec.y * normDropY;
-        const cross = spineVec.x * normDropY - spineVec.y * normDropX;
+        const spineLen = Math.hypot(spineVec.x, spineVec.y) || 1;
+        const normSpineX = spineVec.x / spineLen;
+        const normSpineY = spineVec.y / spineLen;
+
+        const dot = normSpineX * normDropX + normSpineY * normDropY;
+        const cross = normSpineX * normDropY - normSpineY * normDropX;
 
         if (closest.index === 0 && dot < -0.7) return 2; // Nose
 
