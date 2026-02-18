@@ -27,6 +27,12 @@ export default class AudioSystem {
         this.startDrone();
     }
 
+    resume() {
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
     startDrone() {
         // Deep Sea Drone (Low sine + modulation)
         const osc = this.ctx.createOscillator();

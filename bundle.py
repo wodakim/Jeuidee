@@ -27,6 +27,13 @@ def bundle():
         'js/distortion.js',
         'js/boss.js',
         'js/sonar.js',
+        'js/ally.js',
+        'js/state_machine.js',
+        'js/states/menu_state.js',
+        'js/states/play_state.js',
+        'js/states/gameover_state.js',
+        'js/states/intro.js',
+        'js/states/genesis_state.js',
         'js/gameloop.js'
     ]
 
@@ -39,12 +46,19 @@ def bundle():
         os.makedirs('dist')
 
     # Read CSS
-    with open(css_file, 'r') as f:
-        css_content = f.read()
+    try:
+        with open(css_file, 'r') as f:
+            css_content = f.read()
+    except FileNotFoundError:
+        css_content = "" # Fallback if missing
 
     # Read JS and process
     js_content = ""
     for js in js_files:
+        if not os.path.exists(js):
+            print(f"Warning: File {js} not found, skipping.")
+            continue
+
         with open(js, 'r') as f:
             content = f.read()
             # Remove imports
@@ -63,18 +77,26 @@ def bundle():
         html_content = f.read()
 
     # Replace CSS Link
-    html_content = html_content.replace(
-        '<link rel="stylesheet" href="style.css">',
-        f'<style>\n{css_content}\n</style>'
-    )
+    if '<link rel="stylesheet" href="style.css">' in html_content:
+        html_content = html_content.replace(
+            '<link rel="stylesheet" href="style.css">',
+            f'<style>\n{css_content}\n</style>'
+        )
+    else:
+        # Just insert style in head
+        html_content = html_content.replace('</head>', f'<style>\n{css_content}\n</style>\n</head>')
 
     # Replace JS Script (Change type="module" to standard script)
     # The original line is <script type="module" src="js/gameloop.js"></script>
-    html_content = re.sub(
-        r'<script type="module" src="js/gameloop.js"></script>',
-        f'<script>\n{js_content}\n</script>',
-        html_content
-    )
+    if '<script type="module" src="js/gameloop.js"></script>' in html_content:
+        html_content = re.sub(
+            r'<script type="module" src="js/gameloop.js"></script>',
+            f'<script>\n{js_content}\n</script>',
+            html_content
+        )
+    else:
+        # Just append script at end of body
+        html_content = html_content.replace('</body>', f'<script>\n{js_content}\n</script>\n</body>')
 
     # Write Output
     with open(output_file, 'w') as f:
