@@ -14,7 +14,7 @@ export default class EmergenceState {
         this.credits = document.createElement('div');
         this.credits.style = `
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            text-align: center; color: #000; font-family: Orbitron; opacity: 0; transition: opacity 2s; z-index: 1001;
+            text-align: center; color: #000; font-family: Orbitron; opacity: 0; transition: opacity 2s; z-index: 1001; display: none;
         `;
         this.credits.innerHTML = `
             <h1>EMERGENCE</h1>
@@ -34,6 +34,7 @@ export default class EmergenceState {
         this.time = 0;
         this.phase = 'rise';
         this.overlay.style.background = 'rgba(255, 255, 255, 0)';
+        this.credits.style.display = 'block'; // Make visible for later
         this.credits.style.opacity = 0;
         document.getElementById('game-hud').style.display = 'none';
 

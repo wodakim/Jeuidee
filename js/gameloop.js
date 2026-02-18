@@ -290,7 +290,7 @@ class GameLoop {
 
     toggleFX() {
         if (!this.settings.fxEnabled) {
-             if(confirm("WARNING: High Performance Required.\nEnable advanced visual effects? (Battery Drain / Lag possible)")) {
+             if(confirm("WARNING: High Performance Required.\\nEnable advanced visual effects? (Battery Drain / Lag possible)")) {
                  this.settings.toggleFX();
              }
         } else {
