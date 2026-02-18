@@ -945,6 +945,22 @@ class Renderer {
             this.ctx.moveTo(10, -5); this.ctx.lineTo(15, -2); this.ctx.lineTo(20, -5);
             this.ctx.moveTo(10, 5); this.ctx.lineTo(15, 2); this.ctx.lineTo(20, 5);
             this.ctx.fill();
+        } else if (type === 'FilterMouth') {
+            this.ctx.fillStyle = '#4f4';
+            this.ctx.beginPath();
+            // Fan shape
+            this.ctx.arc(0, 0, 20, -Math.PI/3, Math.PI/3);
+            this.ctx.lineTo(0, 0);
+            this.ctx.fill();
+            // Gills lines
+            this.ctx.strokeStyle = '#040';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            for(let i=-2; i<=2; i++) {
+                this.ctx.moveTo(0,0);
+                this.ctx.lineTo(15, i*5);
+            }
+            this.ctx.stroke();
         } else if (type === 'Eye') {
             this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
             this.ctx.fillStyle = 'white';
@@ -1069,9 +1085,16 @@ const PARTS_DB = {
     },
     'Jaws': {
         name: 'Carnivore Jaw',
-        desc: 'Frontal weapon. High damage.',
+        desc: 'Frontal weapon. EATS MEAT.',
         stat: '++ Damage',
         unlocked: true, // Default
+        cost: 50
+    },
+    'FilterMouth': {
+        name: 'Filter Mouth',
+        desc: 'Filters plancton. EATS PLANTS.',
+        stat: '+ Efficiency',
+        unlocked: true, // Default unlocked for choice
         cost: 50
     },
     'Eye': {
@@ -1114,7 +1137,7 @@ const PARTS_DB = {
 class Progression {
     constructor(saveManager) {
         this.saveManager = saveManager;
-        this.unlocked = ['Fin', 'Spike', 'Eye']; // Start with basics
+        this.unlocked = ['Fin', 'Spike', 'Eye', 'Jaws', 'FilterMouth']; // Start with basics
         this.load();
     }
 
@@ -2542,13 +2565,24 @@ class Editor {
     }
 
     getEventPos(e) {
+        const rect = this.game.canvas.getBoundingClientRect();
+        let clientX = 0, clientY = 0;
+
         if (e.touches && e.touches.length > 0) {
-            return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+             clientX = e.changedTouches[0].clientX;
+             clientY = e.changedTouches[0].clientY;
+        } else {
+             clientX = e.clientX;
+             clientY = e.clientY;
         }
-        if (e.changedTouches && e.changedTouches.length > 0) {
-             return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-        }
-        return { x: e.clientX, y: e.clientY };
+
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
     }
 
     onCanvasClick(e) {
@@ -2626,8 +2660,15 @@ class Editor {
         }
 
         slider.style.display = 'flex';
-        slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x - 75)}px`;
-        slider.style.top = `${selection.sp.y - 80}px`;
+        // Adjust for canvas rect if needed, but slider is DOM overlay so use clientX
+        // But selection.sp is relative to canvas? Camera.worldToScreen gives canvas coords.
+        // If canvas is full screen, it's fine. If ad-space shifts it, we might need offset.
+        // Assuming canvas is top 0 left 0. But wait, ad space is bottom.
+        // Play it safe: add canvas offset.
+        const rect = this.game.canvas.getBoundingClientRect();
+
+        slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x + rect.left - 75)}px`;
+        slider.style.top = `${selection.sp.y + rect.top - 80}px`;
 
         if (selection.p.scaleFactor === undefined) {
              const base = selection.p.initialBaseRadius || 20;
@@ -2680,8 +2721,9 @@ class Editor {
 
             const slider = document.getElementById('resize-slider-container');
             if(slider && slider.style.display !== 'none') {
-                 slider.style.left = `${Math.min(window.innerWidth - 160, sp.x - 75)}px`;
-                 slider.style.top = `${sp.y - 80}px`;
+                 // Update slider pos during render in case of zoom/pan?
+                 // Usually static in editor mode.
+                 // We rely on showResizeSlider for positioning.
             }
 
             ctx.save();

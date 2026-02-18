@@ -461,13 +461,24 @@ export default class Editor {
     }
 
     getEventPos(e) {
+        const rect = this.game.canvas.getBoundingClientRect();
+        let clientX = 0, clientY = 0;
+
         if (e.touches && e.touches.length > 0) {
-            return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+             clientX = e.changedTouches[0].clientX;
+             clientY = e.changedTouches[0].clientY;
+        } else {
+             clientX = e.clientX;
+             clientY = e.clientY;
         }
-        if (e.changedTouches && e.changedTouches.length > 0) {
-             return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-        }
-        return { x: e.clientX, y: e.clientY };
+
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
     }
 
     onCanvasClick(e) {
@@ -545,8 +556,15 @@ export default class Editor {
         }
 
         slider.style.display = 'flex';
-        slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x - 75)}px`;
-        slider.style.top = `${selection.sp.y - 80}px`;
+        // Adjust for canvas rect if needed, but slider is DOM overlay so use clientX
+        // But selection.sp is relative to canvas? Camera.worldToScreen gives canvas coords.
+        // If canvas is full screen, it's fine. If ad-space shifts it, we might need offset.
+        // Assuming canvas is top 0 left 0. But wait, ad space is bottom.
+        // Play it safe: add canvas offset.
+        const rect = this.game.canvas.getBoundingClientRect();
+
+        slider.style.left = `${Math.min(window.innerWidth - 160, selection.sp.x + rect.left - 75)}px`;
+        slider.style.top = `${selection.sp.y + rect.top - 80}px`;
 
         if (selection.p.scaleFactor === undefined) {
              const base = selection.p.initialBaseRadius || 20;
@@ -599,8 +617,9 @@ export default class Editor {
 
             const slider = document.getElementById('resize-slider-container');
             if(slider && slider.style.display !== 'none') {
-                 slider.style.left = `${Math.min(window.innerWidth - 160, sp.x - 75)}px`;
-                 slider.style.top = `${sp.y - 80}px`;
+                 // Update slider pos during render in case of zoom/pan?
+                 // Usually static in editor mode.
+                 // We rely on showResizeSlider for positioning.
             }
 
             ctx.save();

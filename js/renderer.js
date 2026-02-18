@@ -197,6 +197,22 @@ export default class Renderer {
             this.ctx.moveTo(10, -5); this.ctx.lineTo(15, -2); this.ctx.lineTo(20, -5);
             this.ctx.moveTo(10, 5); this.ctx.lineTo(15, 2); this.ctx.lineTo(20, 5);
             this.ctx.fill();
+        } else if (type === 'FilterMouth') {
+            this.ctx.fillStyle = '#4f4';
+            this.ctx.beginPath();
+            // Fan shape
+            this.ctx.arc(0, 0, 20, -Math.PI/3, Math.PI/3);
+            this.ctx.lineTo(0, 0);
+            this.ctx.fill();
+            // Gills lines
+            this.ctx.strokeStyle = '#040';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            for(let i=-2; i<=2; i++) {
+                this.ctx.moveTo(0,0);
+                this.ctx.lineTo(15, i*5);
+            }
+            this.ctx.stroke();
         } else if (type === 'Eye') {
             this.ctx.rotate(side === 1 ? -Math.PI/2 : Math.PI/2);
             this.ctx.fillStyle = 'white';
