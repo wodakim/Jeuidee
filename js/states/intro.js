@@ -8,6 +8,38 @@ export default class IntroState {
         this.planetScale = 0;
         this.impactFlash = 0;
 
+        // Create DOM Elements for Text
+        this.titleOverlay = document.createElement('div');
+        this.titleOverlay.className = 'intro-title';
+        this.titleOverlay.style = `
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            text-align: center;
+            color: rgba(0, 255, 255, 0);
+            font-family: Orbitron;
+            font-size: clamp(1.5rem, 5vw, 3rem);
+            white-space: normal;
+            word-wrap: break-word;
+            pointer-events: none;
+            z-index: 50;
+            transition: opacity 1s;
+        `;
+        this.titleOverlay.innerText = "PHASE 1: THE PRIMORDIAL SOUP";
+        document.body.appendChild(this.titleOverlay);
+
+        this.skipBtn = document.createElement('button');
+        this.skipBtn.innerText = "SKIP >>";
+        this.skipBtn.className = 'btn-neon';
+        this.skipBtn.style = `
+            position: absolute; top: 20px; right: 20px;
+            padding: 5px 10px; font-size: 0.8rem; z-index: 60; display: none;
+        `;
+        this.skipBtn.onclick = () => this.game.stateMachine.change('genesis');
+        document.body.appendChild(this.skipBtn);
+
         // Init Stars
         for(let i=0; i<100; i++) {
             this.stars.push({
@@ -26,10 +58,15 @@ export default class IntroState {
 
         // Hide Main Menu if visible
         document.getElementById('main-menu').style.display = 'none';
+        this.skipBtn.style.display = 'block';
+        this.titleOverlay.style.color = 'rgba(0, 255, 255, 0)';
     }
 
     exit() {
-        // Cleanup if needed
+        this.skipBtn.style.display = 'none';
+        this.titleOverlay.style.display = 'none';
+        this.titleOverlay.remove(); // Cleanup DOM
+        this.skipBtn.remove();
     }
 
     update(dt) {
@@ -167,37 +204,9 @@ export default class IntroState {
 
             // Text: "PHASE 1: THE AWAKENING"
             if (this.time > 1.0) {
-                ctx.fillStyle = `rgba(0, 255, 255, ${Math.min(1, (this.time - 1.0))})`;
-
-                // Responsive font size
-                const fontSize = Math.max(20, Math.min(40, w * 0.05));
-                ctx.font = `${fontSize}px Orbitron`;
-                ctx.textAlign = 'center';
-
-                // Word wrap logic
-                const text = "PHASE 1: THE PRIMORDIAL SOUP";
-                const maxWidth = w * 0.9;
-
-                // Simple word wrap
-                const words = text.split(' ');
-                let line = '';
-                let y = cy;
-                const lineHeight = fontSize * 1.5;
-
-                for(let n = 0; n < words.length; n++) {
-                    const testLine = line + words[n] + ' ';
-                    const metrics = ctx.measureText(testLine);
-                    const testWidth = metrics.width;
-                    if (testWidth > maxWidth && n > 0) {
-                        ctx.fillText(line, cx, y);
-                        line = words[n] + ' ';
-                        y += lineHeight;
-                    }
-                    else {
-                        line = testLine;
-                    }
-                }
-                ctx.fillText(line, cx, y);
+                // Fade in DOM text
+                const alpha = Math.min(1, (this.time - 1.0));
+                this.titleOverlay.style.color = `rgba(0, 255, 255, ${alpha})`;
             }
         }
     }

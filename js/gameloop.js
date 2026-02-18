@@ -209,7 +209,7 @@ class GameLoop {
         };
         document.getElementById('reset-save-btn').onclick = () => {
             if(confirm('Reset all progress?')) {
-                this.saveManager.reset();
+                localStorage.clear();
                 location.reload();
             }
         };

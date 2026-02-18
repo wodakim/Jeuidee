@@ -44,7 +44,7 @@ export default class Editor {
                 <button id="zoom-out-btn" class="btn-neon" style="width:40px; height:40px; border-radius:50%; font-size:1.5rem; padding:0;">-</button>
             </div>
 
-            <div id="editor-parts-list" style="position:absolute; bottom:0; left:0; width:100%; height:100px; background:rgba(0,0,0,0.9); display:flex; overflow-x:auto; align-items:center; gap:10px; padding:10px; box-sizing:border-box; pointer-events:auto; border-top:1px solid #333; white-space:nowrap;">
+            <div id="editor-parts-list" style="position:absolute; bottom:0; left:0; width:100%; height:120px; background:rgba(0,0,0,0.9); display:flex; flex-wrap:wrap; overflow-y:auto; justify-content:center; gap:5px; padding:10px; box-sizing:border-box; pointer-events:auto; border-top:1px solid #333;">
                 <!-- Populated Dynamically -->
             </div>
 
@@ -83,14 +83,15 @@ export default class Editor {
             // Card Style
             div.className = 'part-card';
             div.style = `
-                min-width:80px; height:80px; border:1px solid #444; background:rgba(20,20,20,0.8);
+                width:60px; height:60px; border:1px solid #444; background:rgba(20,20,20,0.8);
                 display:flex; flex-direction:column; align-items:center; justify-content:center;
-                border-radius:5px; cursor:grab; user-select:none; color:#aaa; font-size:0.7rem;
+                border-radius:5px; cursor:grab; user-select:none; color:#aaa; font-size:0.6rem;
+                flex-shrink: 0;
             `;
 
             div.innerHTML = `
-                <div style="font-size:1.5rem; margin-bottom:5px;">${key[0]}</div>
-                <div style="font-weight:bold; color:#fff;">${part.name}</div>
+                <div style="font-size:1.2rem; margin-bottom:2px;">${key[0]}</div>
+                <div style="font-weight:bold; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:90%;">${part.name}</div>
                 <div style="color:#0f0;">${part.cost}</div>
             `;
 
@@ -367,21 +368,6 @@ export default class Editor {
         // Angle from bone center to mouse
         const angle = Math.atan2(mouseWorld.y - node.point.y, mouseWorld.x - node.point.x);
 
-        // Determine "side" for symmetry logic or orientation
-        // We can just store the angle. But for compatibility with existing 'side' system:
-        // side 0: Front/Nose (roughly -PI/2 if spine is vertical)
-        // side 1: Right
-        // side -1: Left
-
-        // However, the new requirement says: "Force position: x = node.x + node.radius * cos(angle)"
-        // This implies we should store the precise angle or a generalized 'side' that includes angle.
-        // The existing Part system uses 'side' as an integer (-1, 0, 1).
-        // We need to refactor Part rendering to support arbitrary angles if we want true 360 attachment.
-        // OR we map the angle to the closest discrete side.
-
-        // User requested: "Force rotation: Part oriented by this angle (+/- 90)"
-        // This suggests we need to store the angle in the part data.
-
         return { angle: angle };
     }
 
@@ -413,8 +399,7 @@ export default class Editor {
             this.addPart(this.selectedPart, closest.index, snap.angle);
 
             if (this.symmetry) {
-                // Mirror angle across spine axis?
-                // Assuming spine is roughly vertical (downwards y+).
+                // Mirror angle across spine axis (Vertical Y Axis)
                 // Angle mirrored across Y axis: PI - angle.
                 let mirrorAngle = Math.PI - snap.angle;
                 // Normalize
@@ -596,7 +581,7 @@ export default class Editor {
         }
 
         if (this.isDragging && this.selectedPart) {
-            const closest = this.getClosestBone({x: this.dragX, y: this.dragY});
+            const closest = this.findClosestBodyNode({x: this.dragX, y: this.dragY});
 
             if (closest) {
                 // MAGNET SNAP RENDER
