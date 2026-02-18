@@ -168,9 +168,36 @@ export default class IntroState {
             // Text: "PHASE 1: THE AWAKENING"
             if (this.time > 1.0) {
                 ctx.fillStyle = `rgba(0, 255, 255, ${Math.min(1, (this.time - 1.0))})`;
-                ctx.font = '30px Orbitron';
+
+                // Responsive font size
+                const fontSize = Math.max(20, Math.min(40, w * 0.05));
+                ctx.font = `${fontSize}px Orbitron`;
                 ctx.textAlign = 'center';
-                ctx.fillText("PHASE 1: THE PRIMORDIAL SOUP", cx, cy);
+
+                // Word wrap logic
+                const text = "PHASE 1: THE PRIMORDIAL SOUP";
+                const maxWidth = w * 0.9;
+
+                // Simple word wrap
+                const words = text.split(' ');
+                let line = '';
+                let y = cy;
+                const lineHeight = fontSize * 1.5;
+
+                for(let n = 0; n < words.length; n++) {
+                    const testLine = line + words[n] + ' ';
+                    const metrics = ctx.measureText(testLine);
+                    const testWidth = metrics.width;
+                    if (testWidth > maxWidth && n > 0) {
+                        ctx.fillText(line, cx, y);
+                        line = words[n] + ' ';
+                        y += lineHeight;
+                    }
+                    else {
+                        line = testLine;
+                    }
+                }
+                ctx.fillText(line, cx, y);
             }
         }
     }

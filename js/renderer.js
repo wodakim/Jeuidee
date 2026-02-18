@@ -67,7 +67,7 @@ export default class Renderer {
                     part.ik = IKSystem.createTentacle(8, 10);
                 }
 
-                this.drawPart(part, bone.x, bone.y, spineAngle, bone.radius, color);
+                this.drawPart(part, bone.x, bone.y, spineAngle, bone.radius, color, headAngle);
             });
         }
 
@@ -96,26 +96,43 @@ export default class Renderer {
         this.ctx.restore();
     }
 
-    drawPart(part, x, y, spineAngle, radius, bodyColor) {
+    drawPart(part, x, y, spineAngle, radius, bodyColor, headAngle = 0) {
         const type = part.type;
         const side = part.side;
 
+        // Determine Angle
+        let drawAngle = spineAngle;
+
+        // If part has precise angle (from new Editor)
+        if (part.angle !== undefined) {
+             // part.angle is the Absolute Angle in the Editor (Spine Down = PI/2)
+             // We need to convert this to an offset relative to the spine.
+             // Editor Spine Angle = Math.PI/2
+             // Offset = part.angle - Math.PI/2
+
+             // However, spineAngle passed here is the CURRENT dynamic angle of the bone segment.
+             // So we apply the offset to the current spineAngle.
+             const offset = part.angle - Math.PI/2;
+             drawAngle = spineAngle + offset;
+        } else {
+             // Legacy
+             let sideAngle = 0;
+             if (side === 1) sideAngle = Math.PI/2;
+             else if (side === -1) sideAngle = -Math.PI/2;
+             else if (side === 2) sideAngle = Math.PI;
+             drawAngle = spineAngle + sideAngle;
+        }
+
         // Special handling for Tentacles (World Space Drawing via IK)
         if (type === 'Tentacle' && part.ik) {
-            // Calculate Attachment Point
-            let sideAngle = 0;
-            if (side === 1) sideAngle = Math.PI/2;
-            else if (side === -1) sideAngle = -Math.PI/2;
-
-            const attachAngle = spineAngle + sideAngle;
-            const rootX = x + Math.cos(attachAngle) * radius;
-            const rootY = y + Math.sin(attachAngle) * radius;
+            const rootX = x + Math.cos(drawAngle) * radius;
+            const rootY = y + Math.sin(drawAngle) * radius;
 
             // Update IK
-            IKSystem.update(part.ik, rootX, rootY, attachAngle, 0.016);
+            IKSystem.update(part.ik, rootX, rootY, drawAngle, 0.016);
 
             // Draw
-            this.ctx.save(); // Just in case, though IK draws world space
+            this.ctx.save();
             this.ctx.strokeStyle = '#a0f';
             this.ctx.lineWidth = Math.max(2, radius * 0.3);
             if (this.settings.fxEnabled) {
@@ -146,12 +163,8 @@ export default class Renderer {
         this.ctx.save();
         this.ctx.translate(x, y);
 
-        let sideAngle = 0;
-        if (side === 1) sideAngle = Math.PI/2;
-        else if (side === -1) sideAngle = -Math.PI/2;
-        else if (side === 2) sideAngle = Math.PI; // Nose/Tail Tip
-
-        this.ctx.rotate(spineAngle + sideAngle);
+        // Apply Rotation
+        this.ctx.rotate(drawAngle);
 
         const wobble = Math.sin(Date.now() * 0.005) * 0.1;
         this.ctx.rotate(wobble);
