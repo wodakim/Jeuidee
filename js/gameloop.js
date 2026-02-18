@@ -87,14 +87,6 @@ class GameLoop {
         this.bossActive = false;
         this.mate = null;
 
-        // State Machine
-        this.stateMachine = new StateMachine(this);
-        this.stateMachine.add('menu', new MenuState(this));
-        this.stateMachine.add('playing', new PlayState(this));
-        this.stateMachine.add('gameover', new GameOverState(this));
-        this.stateMachine.add('intro', new IntroState(this));
-        this.stateMachine.add('genesis', new GenesisState(this));
-
         // UI Layers
         this.createUI();
 
@@ -389,7 +381,7 @@ class GameLoop {
 
     startIntro() {
         this.stateMachine.change('intro');
-        if (this.settings.audioEnabled) this.audio.ctx.resume();
+        if (this.settings.audioEnabled) this.audio.resume();
     }
 
     startGame() {

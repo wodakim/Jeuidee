@@ -290,6 +290,12 @@ class AudioSystem {
         }
     }
 
+    startAmbient() {
+        if (!this.droneOsc) {
+            this.startDrone();
+        }
+    }
+
     startDrone() {
         // Deep Sea Drone (Low sine + modulation)
         const osc = this.ctx.createOscillator();
@@ -2489,8 +2495,12 @@ class Editor {
         const normDropX = dropVec.x / dropLen;
         const normDropY = dropVec.y / dropLen;
 
-        const dot = spineVec.x * normDropX + spineVec.y * normDropY;
-        const cross = spineVec.x * normDropY - spineVec.y * normDropX;
+        const spineLen = Math.hypot(spineVec.x, spineVec.y) || 1;
+        const normSpineX = spineVec.x / spineLen;
+        const normSpineY = spineVec.y / spineLen;
+
+        const dot = normSpineX * normDropX + normSpineY * normDropY;
+        const cross = normSpineX * normDropY - normSpineY * normDropX;
 
         if (closest.index === 0 && dot < -0.7) return 2; // Nose
 
@@ -3435,19 +3445,13 @@ class Ally {
 }
 
 
-
-
-
-
-
-
-
-class GameLoop {
-    constructor() {
-        this.running = false;
-        this.lastTime = 0;
-        this.fps = 60;
-        this.step = 1 / this.fps;
+// --- js/state_machine.js ---
+class StateMachine {
+    constructor(game) {
+        this.game = game;
+        this.currentState = null;
+        this.states = {};
+    }
 
     add(name, state) {
         this.states[name] = state;
@@ -3471,22 +3475,12 @@ class GameLoop {
         }
     }
 
-        this.enemies = [];
-        this.allies = [];
-        this.food = [];
-        this.debris = [];
-        this.particles = [];
-        this.hitstop = 0;
-        this.bossActive = false;
-        this.mate = null;
-
-        // State Machine
-        this.stateMachine = new StateMachine(this);
-        this.stateMachine.add('menu', new MenuState(this));
-        this.stateMachine.add('playing', new PlayState(this));
-        this.stateMachine.add('gameover', new GameOverState(this));
-        this.stateMachine.add('intro', new IntroState(this));
-        this.stateMachine.add('genesis', new GenesisState(this));
+    render(ctx) {
+        if (this.currentState && this.currentState.render) {
+            this.currentState.render(ctx);
+        }
+    }
+}
 
 
 // --- js/states/menu_state.js ---
@@ -3501,20 +3495,11 @@ class MenuState {
         this.menuUI.style.display = 'flex';
         this.game.resetCreature(); // Reset for background visual
 
-        // Main Menu
-        const menu = document.createElement('div');
-        menu.id = 'main-menu';
-        menu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:100; flex-direction:column; justify-content:center; align-items:center;';
-        menu.innerHTML = `
-            <h1>NEON ABYSS</h1>
-            <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
-                <button id="play-btn" class="btn-neon">Start Journey</button>
-                <button id="legacy-btn" class="btn-neon" style="border-color:#f0f; color:#f0f;">ANCESTRAL MEMORY</button>
-                <button id="settings-btn" class="btn-neon" style="font-size:1rem; border-color:#888; color:#888;">SETTINGS</button>
-            </div>
-            <p style="margin-top:20px; font-size:0.8em; opacity:0.7;">Touch & Drag to Move</p>
-        `;
-        document.body.appendChild(menu);
+        // Initial setup for background if needed
+        this.game.camera.zoom = 1.0;
+        this.game.camera.x = 0;
+        this.game.camera.y = 0;
+    }
 
     exit() {
         this.menuUI.style.display = 'none';
@@ -3548,6 +3533,1058 @@ class MenuState {
         this.game.lighting.render(ctx);
     }
 }
+
+
+// --- js/states/play_state.js ---
+
+
+
+
+class PlayState {
+    constructor(game) {
+        this.game = game;
+        this.hud = document.getElementById('game-hud');
+        this.paused = false;
+
+        // Tier Tracking
+        this.currentTier = 1;
+        this.maxEntities = 15;
+
+        // Apex Predator Timer
+        this.apexTimer = 30.0; // Seconds
+        this.activeApex = null; // Track current apex
+    }
+
+    enter(params) {
+        this.hud.style.display = 'block';
+        this.paused = false;
+        if (params && params.load) {
+            this.game.saveManager.load();
+        } else if (params && params.reset) {
+            this.game.resetCreature();
+        }
+        this.calculateTier();
+    }
+
+    exit() {
+        this.hud.style.display = 'none';
+    }
+
+    calculateTier() {
+        const mass = this.game.creature.gameStats.mass;
+        let newTier = 1;
+        if (mass >= 500) newTier = 3;
+        else if (mass >= 50) newTier = 2;
+
+        if (newTier !== this.currentTier) {
+            this.currentTier = newTier;
+        }
+    }
+
+    update(dt) {
+        if (this.paused) return;
+        if (this.game.editor.active) return;
+
+        const game = this.game;
+        const creature = game.creature;
+
+        if (creature.gameStats.health <= 0) {
+            game.stateMachine.change('gameover');
+            return;
+        }
+
+        this.calculateTier();
+
+        const baseScale = Math.sqrt(creature.gameStats.mass / 10);
+        creature.points.forEach(p => { if(p.baseRadius) p.radius = p.baseRadius * baseScale; });
+        creature.constraints.forEach(c => { if(c.baseLength) c.length = c.baseLength * baseScale; });
+
+        const head = creature.points[0];
+
+        const inputVec = game.input.getVector();
+        const swimForce = (creature.stats.speed + 1000) * baseScale;
+        const turnSpeed = creature.stats.turnSpeed * 2.0;
+
+        if (game.input.active) {
+            head.x += inputVec.x * swimForce * dt * dt;
+            head.y += inputVec.y * swimForce * dt * dt;
+            let targetAngle = Math.atan2(inputVec.y, inputVec.x);
+            let diff = targetAngle - game.headAngle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            game.headAngle += diff * turnSpeed * dt;
+        }
+
+        if (game.input.checkDoubleTap()) {
+            if (game.progression.isUnlocked('Booster')) {
+                const dashForce = 5000 * baseScale;
+                head.x += Math.cos(game.headAngle) * dashForce * dt;
+                head.y += Math.sin(game.headAngle) * dashForce * dt;
+                game.spawnParticles(head.x, head.y, '#fff', 20, 300);
+                if(game.settings.audioEnabled) game.audio.playDash();
+                if(navigator.vibrate) navigator.vibrate(50);
+            }
+        }
+
+        game.physics.update(creature.points, creature.constraints, dt);
+        game.updateBackgroundOnly(dt);
+        this.manageEntities(dt, head, baseScale);
+        game.boidManager.update(dt, game.enemies);
+
+        if (game.mate) {
+            game.mate.update(dt, head, head.radius);
+            const dist = Math.hypot(head.x - game.mate.points[0].x, head.y - game.mate.points[0].y);
+            if (dist < head.radius + game.mate.points[0].radius + 20) {
+                if (game.settings.audioEnabled) game.audio.playTone(600, 'sine', 1.0);
+                game.editor.toggle(true);
+            }
+        }
+
+        for (let i = game.allies.length - 1; i >= 0; i--) {
+             const ally = game.allies[i];
+             ally.update(dt, game.enemies, head);
+             Physics.checkSoftBodyCollision(creature.points, ally.points);
+        }
+
+        game.skillManager.update(dt);
+        game.distortion.update(dt);
+        game.sonar.update(dt);
+
+        for (let i = game.enemies.length - 1; i >= 0; i--) {
+            const e = game.enemies[i];
+            e.update(dt, head, creature.gameStats.mass);
+
+            Physics.checkSoftBodyCollision(creature.points, e.points);
+            const result = this.resolveCombat(creature, e);
+
+            if (result.hit) {
+                if (result.playerHit) {
+                     const impact = result.impulse || 0;
+                     const velocityDmg = Math.min(20, impact * 0.05);
+                     const dmg = Math.max(0, e.stats.damage + velocityDmg - creature.stats.defense);
+                     creature.gameStats.health -= dmg;
+                     creature.lastDamageTime = Date.now();
+                     if (dmg > 0 && navigator.vibrate) navigator.vibrate(100);
+
+                     const angle = Math.atan2(head.y - e.points[0].y, head.x - e.points[0].x);
+                     head.vx += Math.cos(angle) * 500; head.vy += Math.sin(angle) * 500;
+                }
+                if (result.enemyHit) {
+                     const impact = result.impulse || 0;
+                     const velocityDmg = Math.min(20, impact * 0.05);
+                     const dmg = Math.max(0, creature.stats.damage + velocityDmg - e.stats.defense);
+                     e.health -= dmg;
+                     if(e.onHit) e.onHit();
+
+                     const angle = Math.atan2(e.points[0].y - head.y, e.points[0].x - head.x);
+                     e.points[0].vx += Math.cos(angle) * 500; e.points[0].vy += Math.sin(angle) * 500;
+                }
+
+                game.hitstop = 0.05;
+                const mx = (head.x + e.points[0].x) / 2;
+                const my = (head.y + e.points[0].y) / 2;
+                game.spawnParticles(mx, my, '#ff0044', 5, 200);
+                game.camera.x += (Math.random()-0.5) * 10; game.camera.y += (Math.random()-0.5) * 10;
+                if(game.settings.audioEnabled) game.audio.playTone(100, 'sawtooth', 0.1, mx, my, game.camera);
+
+                if (e.health <= 0) {
+                     game.spawnParticles(mx, my, '#ffaa00', 10, 400);
+                     game.spawnMeat(mx, my, 3 + Math.floor(e.scale));
+                     game.debris.push(new Debris(e.points, e.constraints, e.color, 4));
+                     game.distortion.addShockwave(mx, my);
+                     if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
+                     const drop = game.progression.checkDrop(null, e.difficulty);
+                     if (drop) game.triggerUnlock(drop);
+
+                     if (e.persistent) this.activeApex = null; // Apex died
+                     game.enemies.splice(i, 1);
+                     continue;
+                }
+            }
+        }
+
+        const hasJaws = creature.parts.some(p => p.type === 'Jaws');
+        const hasFilter = creature.parts.some(p => p.type === 'FilterMouth');
+        const isCarnivore = hasJaws;
+        const isHerbivore = hasFilter || !hasJaws;
+
+        for (let i = game.food.length - 1; i >= 0; i--) {
+            const f = game.food[i];
+            const dist = Math.hypot(head.x - f.x, head.y - f.y);
+            if (dist < head.radius + f.radius) {
+                let canEat = false;
+                if (f.type === 'meat' && isCarnivore) canEat = true;
+                if (f.type !== 'meat' && isHerbivore) canEat = true;
+
+                if (canEat) {
+                    game.food.splice(i, 1);
+                    const dnaValue = f.dnaValue || 0.2;
+                    // Reduced growth speed (Balance)
+                    creature.gameStats.dna += dnaValue * 0.5; // Half DNA gain
+                    creature.gameStats.mass += 0.2 * dnaValue; // Slower mass gain
+                    creature.gameStats.health = Math.min(creature.gameStats.maxHealth, creature.gameStats.health + 5);
+                    if(game.settings.audioEnabled) game.audio.playEat(f.x, f.y, game.camera);
+                    if(navigator.vibrate) navigator.vibrate(20);
+                    game.spawnParticles(f.x, f.y, f.color, 5, 100);
+                }
+            }
+        }
+
+        if (game.food.length < 50) {
+            game.spawnFood(10);
+        }
+
+        const sonarBtn = document.getElementById('sonar-btn');
+        if (sonarBtn) {
+            sonarBtn.style.opacity = (creature.gameStats.dna >= 10) ? 1.0 : 0.3;
+        }
+
+        game.camera.update(head.x, head.y, head.vx, head.vy, dt, creature.gameStats.mass);
+        game.biomeManager.update(dt, creature);
+
+        for (let i = game.debris.length - 1; i >= 0; i--) {
+            const d = game.debris[i];
+            d.update(dt, game.physics);
+            if (!d.active) game.debris.splice(i, 1);
+        }
+        for (let i = game.particles.length - 1; i >= 0; i--) {
+            const p = game.particles[i];
+            p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+            if (p.life <= 0) game.particles.splice(i, 1);
+        }
+    }
+
+    manageEntities(dt, playerHead, playerScale) {
+        const game = this.game;
+
+        // --- Apex Predator Logic ---
+        this.apexTimer -= dt;
+        if (this.apexTimer <= 0 && !this.activeApex) {
+            this.apexTimer = 30.0; // Reset
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 1200 * playerScale;
+            const x = playerHead.x + Math.cos(angle) * dist;
+            const y = playerHead.y + Math.sin(angle) * dist;
+
+            const apex = new Enemy(x, y, (this.currentTier + 1) * 3, game.physics, 'hunter');
+            apex.scale = (this.currentTier + 1) * 1.5;
+            apex.color = '#ff0000';
+            apex.state = 'chase';
+            apex.health = 100 * this.currentTier;
+            apex.parts.push({type: 'Jaws', boneIndex: 0, side: 0});
+            apex.persistent = true; // Important!
+            game.enemies.push(apex);
+            this.activeApex = apex;
+
+            // Warning
+            game.distortion.addShockwave(x, y);
+            const warning = document.createElement('div');
+            warning.style = "position:absolute; top:20%; width:100%; text-align:center; color:red; font-family:Orbitron; animation:pulse 1s infinite;";
+            warning.innerText = "APEX PREDATOR DETECTED";
+            document.body.appendChild(warning);
+            setTimeout(() => warning.remove(), 3000);
+        }
+
+        const cam = game.camera;
+        const viewRadiusW = (game.width / 2) / cam.zoom;
+        const viewRadiusH = (game.height / 2) / cam.zoom;
+        const viewRadius = Math.max(viewRadiusW, viewRadiusH);
+
+        const spawnMin = viewRadius + 100;
+        const spawnMax = spawnMin + 500;
+        const despawnDist = spawnMax + 200;
+
+        for (let i = game.enemies.length - 1; i >= 0; i--) {
+            const e = game.enemies[i];
+            const dist = Math.hypot(playerHead.x - e.points[0].x, playerHead.y - e.points[0].y);
+
+            if (dist > despawnDist && e.bossType !== 'Leviathan' && !e.persistent) {
+                game.enemies.splice(i, 1);
+                continue;
+            }
+            if (e.tier < this.currentTier - 1 && !e.persistent) {
+                game.enemies.splice(i, 1);
+            }
+        }
+
+        if (game.enemies.length >= this.maxEntities) return;
+        if (Math.random() > 0.05) return;
+
+        const angle = Math.random() * Math.PI * 2;
+        const dist = spawnMin + Math.random() * (spawnMax - spawnMin);
+        const x = playerHead.x + Math.cos(angle) * dist;
+        const y = playerHead.y + Math.sin(angle) * dist;
+
+        let spawnTier = this.currentTier;
+        const r = Math.random();
+        if (r < 0.6) spawnTier = this.currentTier;
+        else if (r < 0.9 && this.currentTier > 1) spawnTier = this.currentTier - 1;
+        else if (r < 1.0) spawnTier = this.currentTier + 1;
+
+        if (spawnTier > 3) spawnTier = 3;
+
+        const type = Math.random() > 0.5 ? 'grazer' : 'hunter';
+
+        if (type === 'grazer') {
+            const count = 3 + Math.floor(Math.random() * 3);
+            if (game.enemies.length + count > this.maxEntities) return;
+            const flock = game.boidManager.createFlock(x, y, count, spawnTier, 'grazer');
+            flock.forEach(e => {
+                e.tier = spawnTier; e.scale = spawnTier;
+                e.health *= spawnTier; e.stats.damage *= spawnTier;
+            });
+            game.enemies.push(...flock);
+        } else {
+            const e = new Enemy(x, y, spawnTier * 2, game.physics, 'hunter');
+            e.tier = spawnTier; e.scale = spawnTier;
+            e.health *= spawnTier; e.stats.damage *= spawnTier;
+            game.enemies.push(e);
+        }
+    }
+
+    resolveCombat(player, enemy) {
+        let result = { hit: false, playerHit: false, enemyHit: false, impulse: 0 };
+
+        const weaponParts = player.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws' || p.type === 'Poison');
+        for (let part of weaponParts) {
+            const bone = player.points[part.boneIndex];
+            if (!bone) continue;
+            const range = bone.radius + 20;
+
+            for (let ePoint of enemy.points) {
+                const dist = Math.hypot(bone.x - ePoint.x, bone.y - ePoint.y);
+                if (dist < range + ePoint.radius) {
+                    result.hit = true;
+                    result.enemyHit = true;
+                    // Calculate Impulse
+                    const relVx = (bone.vx || 0) - (ePoint.vx || 0);
+                    const relVy = (bone.vy || 0) - (ePoint.vy || 0);
+                    result.impulse = Math.hypot(relVx, relVy);
+                    break;
+                }
+            }
+            if (result.enemyHit) break;
+        }
+
+        const enemyWeapons = enemy.parts.filter(p => p.type === 'Spike' || p.type === 'Jaws');
+        for (let part of enemyWeapons) {
+            const bone = enemy.points[part.boneIndex];
+            if (!bone) continue;
+            const range = bone.radius + 20;
+
+            for (let pPoint of player.points) {
+                const dist = Math.hypot(bone.x - pPoint.x, bone.y - pPoint.y);
+                if (dist < range + pPoint.radius) {
+                    result.hit = true;
+                    result.playerHit = true;
+                    const relVx = (bone.vx || 0) - (pPoint.vx || 0);
+                    const relVy = (bone.vy || 0) - (pPoint.vy || 0);
+                    result.impulse = Math.hypot(relVx, relVy);
+                    break;
+                }
+            }
+            if (result.playerHit) break;
+        }
+
+        return result;
+    }
+
+    render(ctx) {
+        if (this.game.editor.active) {
+            this.game.editor.render(ctx);
+            return;
+        }
+
+        const game = this.game;
+        if (game.settings.fxEnabled) game.lighting.update(game.camera, { player: game.creature, enemies: game.enemies, food: game.food });
+
+        const head = game.creature.points[0];
+        const biome = game.biomeManager.getCurrentBiome(head ? head.x : 0, head ? head.y : 0);
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, game.height);
+        bgGrad.addColorStop(0, '#000000');
+        bgGrad.addColorStop(1, biome.color);
+        ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, game.width, game.height);
+
+        this.renderParallax(ctx);
+
+        game.camera.apply(ctx);
+        if(game.settings.fxEnabled) ctx.globalCompositeOperation = 'lighter';
+        game.food.forEach(f => {
+            ctx.fillStyle = f.color;
+            ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.globalCompositeOperation = 'source-over';
+        game.debris.forEach(d => d.render(ctx));
+        game.particles.forEach(p => {
+            ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.globalAlpha = 1.0;
+
+        game.enemies.forEach(e => {
+            e.render(ctx);
+        });
+
+        if (game.mate) game.renderer.drawCreature(game.mate, 0);
+        game.renderer.drawCreature(game.creature, game.headAngle);
+        game.camera.restore(ctx);
+
+        game.lighting.render(ctx);
+        game.distortion.render(ctx, game.camera);
+        game.sonar.render(ctx, game.camera);
+
+        this.drawHUD(ctx);
+        this.drawApexWarning(ctx);
+    }
+
+    drawApexWarning(ctx) {
+        if (!this.activeApex) return;
+
+        const game = this.game;
+        const cam = game.camera;
+        const target = this.activeApex.points[0];
+        const screenPos = cam.worldToScreen(target.x, target.y);
+        const w = game.width;
+        const h = game.height;
+
+        // Check if offscreen
+        if (screenPos.x < 0 || screenPos.x > w || screenPos.y < 0 || screenPos.y > h) {
+            const cx = w/2;
+            const cy = h/2;
+            const angle = Math.atan2(screenPos.y - cy, screenPos.x - cx);
+            const r = Math.min(w, h)/2 - 40;
+
+            const px = cx + Math.cos(angle) * r;
+            const py = cy + Math.sin(angle) * r;
+
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(angle);
+            ctx.fillStyle = '#f00';
+            ctx.beginPath();
+            ctx.moveTo(10, 0); ctx.lineTo(-10, 10); ctx.lineTo(-10, -10);
+            ctx.fill();
+            ctx.restore();
+
+            // Text Pulse
+            const pulse = (Date.now() % 1000) / 1000;
+            if (pulse < 0.5) {
+                ctx.fillStyle = '#f00';
+                ctx.font = '20px Orbitron';
+                ctx.textAlign = 'center';
+                ctx.fillText("DANGER", px, py + 30);
+            }
+        }
+    }
+
+    renderParallax(ctx) {
+        const game = this.game;
+        const cam = game.camera;
+        const cx = game.width / 2;
+        const cy = game.height / 2;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(1.0, 1.0);
+        ctx.translate(-cam.x * 0.05, -cam.y * 0.05);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        game.bgDeep.forEach(p => {
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(cam.zoom * 0.5, cam.zoom * 0.5);
+        ctx.translate(-cam.x * 0.2, -cam.y * 0.2);
+        ctx.fillStyle = 'rgba(100, 255, 255, 0.1)';
+        game.bgMid.forEach(p => {
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 2, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(cam.zoom * 1.5, cam.zoom * 1.5);
+        ctx.translate(-cam.x * 1.5, -cam.y * 1.5);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        game.bgFore.forEach(p => {
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
+    }
+
+    drawHUD(ctx) {
+        const game = this.game;
+        const dna = Math.floor(game.creature.gameStats.dna);
+        const w = game.width;
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 10, 30, 0.8)';
+        ctx.fillRect(0, 0, w, 60);
+        ctx.beginPath();
+        ctx.moveTo(0, 60); ctx.lineTo(w, 60);
+        ctx.strokeStyle = '#00aaff';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = '#00aaff';
+        ctx.font = '20px Orbitron';
+        ctx.textAlign = 'left';
+        ctx.fillText(`DNA-SEQUENCE: ${dna}`, 20, 38);
+        ctx.textAlign = 'right';
+        ctx.fillText(`TIER: ${this.currentTier}`, w - 20, 38);
+        ctx.restore();
+    }
+}
+
+
+// --- js/states/gameover_state.js ---
+class GameOverState {
+    constructor(game) {
+        this.game = game;
+        this.ui = document.getElementById('game-over');
+    }
+
+    enter() {
+        this.ui.style.display = 'flex';
+        document.getElementById('game-hud').style.display = 'none';
+    }
+
+    exit() {
+        this.ui.style.display = 'none';
+    }
+
+    update(dt) {
+        // Slow motion update or freeze?
+        // Let's keep background moving but not physics
+        this.game.updateBackgroundOnly(dt);
+    }
+
+    render(ctx) {
+        // Draw the last frame of the game basically
+        // But maybe red tinted
+        // For simplicity, just render the PlayState's view but frozen?
+        // Or just background.
+
+        // Let's render background + dead creature debris
+        const game = this.game;
+
+        // Background
+        game.renderBackgroundLayers(ctx); // We need to expose this method in GameLoop
+
+        // Debris
+        game.camera.apply(ctx);
+        game.debris.forEach(d => d.render(ctx));
+        game.camera.restore(ctx);
+
+        // Vignette Red
+        ctx.fillStyle = 'rgba(50, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, game.width, game.height);
+    }
+}
+
+
+// --- js/states/intro.js ---
+class IntroState {
+    constructor(game) {
+        this.game = game;
+        this.time = 0;
+        this.phase = 'space'; // space, entry, impact, submerged, transition
+        this.stars = [];
+        this.bubbles = [];
+        this.planetScale = 0;
+        this.impactFlash = 0;
+
+        // Init Stars
+        for(let i=0; i<100; i++) {
+            this.stars.push({
+                x: (Math.random()-0.5) * window.innerWidth,
+                y: (Math.random()-0.5) * window.innerHeight,
+                z: Math.random() * 2 // depth
+            });
+        }
+    }
+
+    enter() {
+        this.time = 0;
+        this.phase = 'space';
+        this.game.audio.startAmbient(); // Ensure audio is ready
+        document.getElementById('game-hud').style.display = 'none';
+
+        // Hide Main Menu if visible
+        document.getElementById('main-menu').style.display = 'none';
+    }
+
+    exit() {
+        // Cleanup if needed
+    }
+
+    update(dt) {
+        this.time += dt;
+
+        if (this.phase === 'space') {
+            // Move stars
+            this.stars.forEach(s => {
+                s.z -= dt * 0.5;
+                if (s.z <= 0) s.z += 2;
+            });
+
+            // Planet grows
+            if (this.time > 2.0) {
+                this.planetScale += dt * 0.5;
+            }
+
+            if (this.planetScale > 5.0) {
+                this.phase = 'entry';
+                this.time = 0; // Reset local time for next phase
+            }
+        }
+        else if (this.phase === 'entry') {
+            // Shake and burn
+            this.planetScale += dt * 10.0; // Fast zoom into surface
+
+            if (this.time > 1.5) {
+                this.phase = 'impact';
+                this.impactFlash = 1.0;
+                this.time = 0;
+                if(navigator.vibrate) navigator.vibrate(200);
+            }
+        }
+        else if (this.phase === 'impact') {
+            this.impactFlash -= dt * 0.5;
+            if (this.time > 2.0) {
+                this.phase = 'submerged';
+                this.time = 0;
+                // Initialize bubbles
+                for(let i=0; i<50; i++) {
+                    this.bubbles.push({
+                        x: Math.random() * this.game.width,
+                        y: this.game.height + Math.random() * 500,
+                        r: 2 + Math.random() * 5,
+                        v: 50 + Math.random() * 100
+                    });
+                }
+            }
+        }
+        else if (this.phase === 'submerged') {
+            // Bubbles rise
+            this.bubbles.forEach(b => {
+                b.y -= b.v * dt;
+                b.x += Math.sin(b.y * 0.05) * 1;
+            });
+
+            // Camera pans down or we fade in the creature
+            if (this.time > 4.0) {
+                this.game.stateMachine.change('genesis');
+            }
+        }
+    }
+
+    render(ctx) {
+        const w = this.game.width;
+        const h = this.game.height;
+        const cx = w/2;
+        const cy = h/2;
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, w, h);
+
+        if (this.phase === 'space' || this.phase === 'entry') {
+            // Draw Stars
+            ctx.fillStyle = '#fff';
+            this.stars.forEach(s => {
+                const k = 128.0 / s.z;
+                const px = s.x * k + cx;
+                const py = s.y * k + cy;
+
+                if (px >= 0 && px <= w && py >= 0 && py <= h) {
+                    const size = (1 - s.z / 2) * 3;
+                    ctx.beginPath();
+                    ctx.arc(px, py, Math.max(0.1, size), 0, Math.PI*2);
+                    ctx.fill();
+                }
+            });
+
+            // Draw Planet
+            if (this.planetScale > 0) {
+                const radius = 50 * Math.pow(this.planetScale, 2);
+                const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+                grad.addColorStop(0, '#000022');
+                grad.addColorStop(0.5, '#0044aa');
+                grad.addColorStop(1, '#0088ff');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+
+        if (this.phase === 'entry') {
+             // Red heat burn overlay
+             ctx.fillStyle = `rgba(255, 100, 0, ${Math.min(0.5, this.time * 0.5)})`;
+             ctx.fillRect(0, 0, w, h);
+
+             // Shake
+             ctx.save();
+             ctx.translate((Math.random()-0.5)*20, (Math.random()-0.5)*20);
+             ctx.restore();
+        }
+
+        if (this.phase === 'impact') {
+            ctx.fillStyle = `rgba(255, 255, 255, ${this.impactFlash})`;
+            ctx.fillRect(0, 0, w, h);
+        }
+
+        if (this.phase === 'submerged') {
+            // Deep Blue
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, '#000011');
+            grad.addColorStop(1, '#001133');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Bubbles
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            this.bubbles.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // Text: "PHASE 1: THE AWAKENING"
+            if (this.time > 1.0) {
+                ctx.fillStyle = `rgba(0, 255, 255, ${Math.min(1, (this.time - 1.0))})`;
+                ctx.font = '30px Orbitron';
+                ctx.textAlign = 'center';
+                ctx.fillText("PHASE 1: THE PRIMORDIAL SOUP", cx, cy);
+            }
+        }
+    }
+}
+
+
+// --- js/states/genesis_state.js ---
+
+
+class GenesisState {
+    constructor(game) {
+        this.game = game;
+        this.ui = document.createElement('div');
+        this.ui.id = 'genesis-ui';
+        this.ui.style = `position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); display:none; flex-direction:column; justify-content:center; align-items:center; z-index:200; font-family:Orbitron; overflow-y:auto;`;
+
+        this.ui.innerHTML = `
+            <style>
+                #genesis-container {
+                    display: flex;
+                    gap: 50px;
+                }
+                .genesis-card {
+                    width: 200px;
+                    height: 300px;
+                    border-radius: 10px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    transition: 0.3s;
+                }
+                #genesis-title {
+                    color: #fff;
+                    text-shadow: 0 0 10px #0ff;
+                    margin-bottom: 50px;
+                    text-align: center;
+                }
+                @media (max-width: 600px) {
+                    #genesis-container {
+                        flex-direction: column;
+                        gap: 20px;
+                        width: 100%;
+                        align-items: center;
+                        padding-bottom: 50px;
+                    }
+                    .genesis-card {
+                        width: 80%;
+                        height: auto;
+                        padding: 20px;
+                    }
+                    #genesis-title {
+                        font-size: 1.5rem;
+                        margin-bottom: 20px;
+                        margin-top: 20px;
+                    }
+                }
+            </style>
+            <h1 id="genesis-title">CHOOSE YOUR PATH</h1>
+            <div id="genesis-container">
+                <div id="choice-herb" class="genesis-card" style="border:2px solid #0f0; background:rgba(0,50,0,0.5);">
+                    <div style="font-size:4rem; color:#0f0;">🌿</div>
+                    <h2 style="color:#0f0;">HERBIVORE</h2>
+                    <p style="color:#aaa; font-size:0.8rem; text-align:center; padding:10px;">Filter Feeder.<br>Eats Plants.<br>Peaceful Growth.</p>
+                </div>
+                <div id="choice-carn" class="genesis-card" style="border:2px solid #f00; background:rgba(50,0,0,0.5);">
+                    <div style="font-size:4rem; color:#f00;">☠️</div>
+                    <h2 style="color:#f00;">CARNIVORE</h2>
+                    <p style="color:#aaa; font-size:0.8rem; text-align:center; padding:10px;">Predator.<br>Eats Meat.<br>Hunt to Survive.</p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(this.ui);
+
+        document.getElementById('choice-herb').onclick = () => this.select('herbivore');
+        document.getElementById('choice-carn').onclick = () => this.select('carnivore');
+    }
+
+    enter() {
+        this.ui.style.display = 'flex';
+        // Reset Camera
+        this.game.camera.x = 0;
+        this.game.camera.y = 0;
+        this.game.camera.zoom = 1.0;
+    }
+
+    exit() {
+        this.ui.style.display = 'none';
+    }
+
+    select(type) {
+        // Configure Player
+        this.game.resetCreature(); // Basic spine
+        const creature = this.game.creature;
+
+        // Remove default parts if any (resetCreature doesn't add parts usually, but check)
+        creature.parts = [];
+
+        if (type === 'herbivore') {
+            creature.color = '#00ff00';
+            creature.parts.push({ type: 'FilterMouth', boneIndex: 0, side: 0 });
+            creature.parts.push({ type: 'Fin', boneIndex: 1, side: 1 });
+            creature.parts.push({ type: 'Fin', boneIndex: 1, side: -1 });
+        } else {
+            creature.color = '#ff0044';
+            creature.parts.push({ type: 'Jaws', boneIndex: 0, side: 0 });
+            creature.parts.push({ type: 'Spike', boneIndex: 0, side: 0 }); // Extra weapon
+            creature.parts.push({ type: 'Fin', boneIndex: 2, side: 1 });
+            creature.parts.push({ type: 'Fin', boneIndex: 2, side: -1 });
+        }
+
+        creature.stats.calculate(creature.parts);
+
+        // Transition
+        if(this.game.settings.audioEnabled) this.game.audio.playTone(400, 'sine', 0.5);
+        this.game.stateMachine.change('playing', { load: false }); // Do NOT load save, start fresh
+    }
+
+    update(dt) {
+        this.game.updateBackgroundOnly(dt);
+    }
+
+    render(ctx) {
+        // Just render background
+        this.game.renderBackgroundLayers(ctx);
+        this.game.lighting.render(ctx);
+    }
+}
+
+
+// --- js/gameloop.js ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class GameLoop {
+    constructor() {
+        this.running = false;
+        this.lastTime = 0;
+        this.fps = 60;
+        this.step = 1 / this.fps;
+
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.width = 0;
+        this.height = 0;
+
+        this.input = new Input();
+        this.physics = new Physics();
+        this.camera = new Camera(window.innerWidth, window.innerHeight);
+        this.settings = new Settings();
+        this.audio = new AudioSystem();
+        this.lighting = new Lighting(this.canvas, this.settings);
+        this.renderer = new Renderer(this.ctx, this.camera, this.settings);
+
+        // --- JELLY CREATURE (Soft Body) ---
+        this.creature = {
+            points: [],
+            constraints: [],
+            parts: [],
+            stats: new Stats(),
+            gameStats: { dna: 0, mass: 10, health: 100, maxHealth: 100 },
+            color: '#00ffff'
+        };
+
+        this.saveManager = new SaveManager(this);
+        this.progression = new Progression(this.saveManager);
+        this.legacyManager = new LegacyManager();
+        this.assets = new AssetGenerator();
+        this.boidManager = new BoidManager(this.physics);
+        this.biomeManager = new BiomeManager(this);
+        this.headAngle = 0;
+        this.editor = new Editor(this);
+        this.skillManager = new SkillManager(this);
+        this.distortion = new Distortion(this.canvas, this.settings);
+        this.sonar = new Sonar(this);
+
+        // Ecosystem
+        this.bgAbyssal = [];
+        this.bgRays = { angle: 0 };
+        this.bgDeep = [];
+        this.bgMid = [];
+        this.bgFore = [];
+
+        this.enemies = [];
+        this.allies = [];
+        this.food = [];
+        this.debris = [];
+        this.particles = [];
+        this.hitstop = 0;
+        this.bossActive = false;
+        this.mate = null;
+
+        // UI Layers
+        this.createUI();
+
+        // State Machine
+        this.stateMachine = new StateMachine(this);
+        this.stateMachine.add('menu', new MenuState(this));
+        this.stateMachine.add('playing', new PlayState(this));
+        this.stateMachine.add('gameover', new GameOverState(this));
+        this.stateMachine.add('intro', new IntroState(this));
+        this.stateMachine.add('genesis', new GenesisState(this));
+
+        this.init();
+    }
+
+    createUI() {
+        // AD SPACE
+        const adSpace = document.createElement('div');
+        adSpace.id = 'ad-space';
+        adSpace.style = `position:absolute; bottom:0; left:0; width:100%; height:50px; background:rgba(0,0,0,0.8); display:flex; justify-content:center; align-items:center; z-index:1000; color:#444; font-family:Orbitron; pointer-events:none; border-top:1px solid #333;`;
+        adSpace.innerText = 'AD SPACE';
+        document.body.appendChild(adSpace);
+
+        // Main Menu
+        const menu = document.createElement('div');
+        menu.id = 'main-menu';
+        menu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:100; flex-direction:column; justify-content:center; align-items:center;';
+        menu.innerHTML = `
+            <h1>NEON ABYSS</h1>
+            <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
+                <button id="play-btn" class="btn-neon">Start Journey</button>
+                <button id="legacy-btn" class="btn-neon" style="border-color:#f0f; color:#f0f;">ANCESTRAL MEMORY</button>
+                <button id="settings-btn" class="btn-neon" style="font-size:1rem; border-color:#888; color:#888;">SETTINGS</button>
+            </div>
+            <p style="margin-top:20px; font-size:0.8em; opacity:0.7;">Touch & Drag to Move</p>
+        `;
+        document.body.appendChild(menu);
+
+        // Legacy Menu
+        const legacyMenu = document.createElement('div');
+        legacyMenu.id = 'legacy-menu';
+        legacyMenu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:200; flex-direction:column; align-items:center; padding:20px; box-sizing:border-box; overflow-y:auto;';
+        document.body.appendChild(legacyMenu);
+
+        // Settings Menu
+        const settingsMenu = document.createElement('div');
+        settingsMenu.id = 'settings-menu';
+        settingsMenu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:200; flex-direction:column; justify-content:center; align-items:center;';
+        settingsMenu.innerHTML = `
+            <h2 style="font-family:Orbitron; color:#0ff;">SETTINGS</h2>
+            <div style="display:flex; flex-direction:column; gap:15px;">
+                <button id="toggle-fx-btn" class="btn-neon">FX: ON</button>
+                <button id="toggle-audio-btn" class="btn-neon">AUDIO: ON</button>
+                <button id="export-btn" class="btn-neon" style="border-color:#ff0; color:#ff0;">EXPORT DNA</button>
+                <button id="import-btn" class="btn-neon" style="border-color:#ff0; color:#ff0;">IMPORT RIVAL</button>
+                <button id="reset-save-btn" class="btn-neon btn-danger">RESET SAVE</button>
+                <button id="back-btn" class="btn-neon" style="margin-top:20px;">BACK</button>
+            </div>
+        `;
+        document.body.appendChild(settingsMenu);
+
+        // Pause Menu
+        const pauseMenu = document.createElement('div');
+        pauseMenu.id = 'pause-menu';
+        pauseMenu.style = 'display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:200; flex-direction:column; justify-content:center; align-items:center;';
+        pauseMenu.innerHTML = `
+            <h2 style="font-family:Orbitron; color:#0ff;">PAUSED</h2>
+            <div style="display:flex; flex-direction:column; gap:15px;">
+                <button id="resume-btn" class="btn-neon">RESUME</button>
+                <button id="pause-fx-btn" class="btn-neon">FX: ON</button>
+                <button id="pause-audio-btn" class="btn-neon">AUDIO: ON</button>
+                <button id="quit-btn" class="btn-neon btn-danger">MAIN MENU</button>
+            </div>
+        `;
+        document.body.appendChild(pauseMenu);
+
+        // Game Over Screen
+        const gameOver = document.createElement('div');
+        gameOver.id = 'game-over';
+        gameOver.style = 'display:none';
+        gameOver.innerHTML = `
+            <h1 style="color:var(--danger); text-shadow:0 0 20px var(--danger);">EXTINCT</h1>
+            <div style="margin-top:20px;">
+                <button id="respawn-btn" class="btn-neon btn-danger">REBIRTH</button>
+            </div>
+        `;
+        document.body.appendChild(gameOver);
+
+        // Unlock Overlay
+        const unlockOverlay = document.createElement('div');
+        unlockOverlay.id = 'unlock-overlay';
+        unlockOverlay.style = `display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:500; align-items:center; justify-content:center;`;
+        document.body.appendChild(unlockOverlay);
+
+        // HUD
+        const hud = document.createElement('div');
+        hud.id = 'game-hud';
+        hud.style = `position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:90;`;
+        hud.innerHTML = `
+            <button id="pause-trigger-btn" style="position:absolute; top:20px; left:20px; pointer-events:auto; background:rgba(0,0,0,0.5); border:1px solid #0ff; color:#0ff; border-radius:50%; width:40px; height:40px; font-weight:bold; cursor:pointer;">II</button>
+            <button id="sonar-btn" style="position:absolute; bottom:80px; right:20px; pointer-events:auto; background:rgba(0,0,0,0.5); border:2px solid #0ff; color:#0ff; border-radius:50%; width:60px; height:60px; font-weight:bold; cursor:pointer; box-shadow:0 0 10px #0ff; display:flex; justify-content:center; align-items:center; font-size:24px;">((•))</button>
+            <button id="evolve-btn" style="display:none; position:absolute; top:20px; right:20px; pointer-events:auto; padding:10px 20px; background:linear-gradient(45deg, #f0f, #00f); border:none; border-radius:20px; font-family:Orbitron; font-weight:bold; color:#fff; cursor:pointer; box-shadow:0 0 10px #f0f;">EVOLVE (10 DNA)</button>
+        `;
+        document.body.appendChild(hud);
+
+        this.setupEventListeners();
+    }
 
     setupEventListeners() {
         document.getElementById('play-btn').onclick = () => this.startIntro();
@@ -3737,7 +4774,7 @@ Enable advanced visual effects? (Battery Drain / Lag possible)")) {
 
     startIntro() {
         this.stateMachine.change('intro');
-        if (this.settings.audioEnabled) this.audio.ctx.resume();
+        if (this.settings.audioEnabled) this.audio.resume();
     }
 
     startGame() {

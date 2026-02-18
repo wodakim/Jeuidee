@@ -33,6 +33,12 @@ export default class AudioSystem {
         }
     }
 
+    startAmbient() {
+        if (!this.droneOsc) {
+            this.startDrone();
+        }
+    }
+
     startDrone() {
         // Deep Sea Drone (Low sine + modulation)
         const osc = this.ctx.createOscillator();
